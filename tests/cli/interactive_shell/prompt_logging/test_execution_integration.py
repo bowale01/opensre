@@ -5,6 +5,9 @@ import io
 from rich.console import Console
 
 from app.cli.interactive_shell.prompt_logging import LlmRunInfo
+from app.cli.interactive_shell.routing.handle_message_with_agent.orchestration.agent_actions import (
+    TerminalActionExecutionResult,
+)
 from app.cli.interactive_shell.routing.types import RouteDecision, RouteKind
 from app.cli.interactive_shell.runtime import execution
 from app.cli.interactive_shell.runtime.session import ReplSession
@@ -68,3 +71,47 @@ def test_execute_routed_turn_follow_up_records_prompt_response(monkeypatch) -> N
     )
     assert recorder.responses == ["follow up response"]
     assert recorder.flushed is True
+
+
+def test_execute_routed_turn_cli_agent_empty_response_prints_deterministic_fallback(
+    monkeypatch,
+) -> None:
+    recorder = _FakeRecorder()
+    monkeypatch.setattr(execution.PromptRecorder, "start", lambda **_kwargs: recorder)
+    monkeypatch.setattr(
+        execution,
+        "execute_cli_actions_with_metrics",
+        lambda *_args, **_kwargs: TerminalActionExecutionResult(
+            planned_count=0,
+            executed_count=0,
+            executed_success_count=0,
+            has_unhandled_clause=False,
+            handled=False,
+        ),
+    )
+    monkeypatch.setattr(
+        execution,
+        "answer_cli_agent",
+        lambda *_args, **_kwargs: LlmRunInfo(response_text=""),
+    )
+
+    session = ReplSession()
+    session.configured_integrations_known = True
+    session.configured_integrations = ()
+    decision = RouteDecision(RouteKind.CLI_AGENT, 0.9, ())
+    output = io.StringIO()
+    execution.execute_routed_turn(
+        "show datadog integration details",
+        session,
+        Console(file=output, force_terminal=False, highlight=False),
+        on_exit=lambda: None,
+        decision=decision,
+    )
+
+    rendered = output.getvalue().lower()
+    assert "datadog integration details" in rendered
+    assert "integrations are configured" in rendered
+    assert "investigate" in rendered
+    assert recorder.responses
+    assert "datadog integration details" in recorder.responses[0].lower()
+    assert session.last_assistant_intent == "cli_agent_fallback"

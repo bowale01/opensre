@@ -31,6 +31,24 @@ execute_cli_actions_with_metrics = _agent_actions.execute_cli_actions_with_metri
 dispatch_slash = _commands.dispatch_slash
 
 
+def _build_cli_agent_empty_response_fallback(text: str, session: ReplSession) -> str:
+    """Deterministic reply when the CLI-agent LLM returns an empty response."""
+    condensed = " ".join(text.strip().split())
+    if len(condensed) > 240:
+        condensed = f"{condensed[:237]}..."
+
+    if session.configured_integrations_known and not session.configured_integrations:
+        guidance = (
+            "No integrations are configured in this session yet. "
+            "Use `/integrations` to set one up, or run `opensre investigate --help` "
+            "to review investigation commands."
+        )
+    else:
+        guidance = "You can run `opensre investigate --help` to review investigation commands."
+
+    return f"I can help investigate this request: {condensed}\n\n{guidance}"
+
+
 def run_new_alert(
     text: str,
     session: ReplSession,
@@ -188,8 +206,11 @@ def execute_routed_turn(
         # generate an actual reply.
         with apply_reasoning_effort(session.reasoning_effort):
             run = answer_cli_agent(text, session, console, confirm_fn=confirm_fn)
+        assistant_text = run.response_text if run is not None and run.response_text else ""
+        if not assistant_text.strip():
+            assistant_text = _build_cli_agent_empty_response_fallback(text, session)
+            console.print(assistant_text, markup=False)
         if recorder is not None:
-            assistant_text = run.response_text if run is not None and run.response_text else ""
             recorder.set_response(assistant_text, run)
             recorder.flush()
         session.record("cli_agent", text)
