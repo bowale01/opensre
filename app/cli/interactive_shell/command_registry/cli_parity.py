@@ -146,13 +146,12 @@ def _start_test_command(
 
 def _run_test_picker_for_background(session: ReplSession, console: Console) -> bool:
     console.print()
-    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115
+    with contextlib.closing(tempfile.NamedTemporaryFile(
         prefix="opensre-test-selection-",
         suffix=".json",
         delete=False,
-    )
-    selection_path = Path(handle.name)
-    handle.close()
+    )) as handle:
+        selection_path = Path(handle.name)
     try:
         env = dict(os.environ)
         env[_TEST_PICKER_SELECTION_FILE_ENV] = str(selection_path)

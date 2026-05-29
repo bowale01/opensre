@@ -394,11 +394,8 @@ async def run_interactive(
         state.request_exit()
         state.cancel_current_dispatch()
         sampler_task.cancel()
-        try:  # noqa: SIM105
+        with contextlib.suppress(asyncio.CancelledError):
             await sampler_task
-        except asyncio.CancelledError:
-            # Expected during shutdown after explicit task cancellation.
-            pass
         processor_task.cancel()
         alert_watcher_task.cancel()
         spinner_ticker_task.cancel()
