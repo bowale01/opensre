@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from app.feedback import (
+    MissRecord,
     MissTaxonomy,
     compute_recurrence,
     compute_stats,
@@ -63,6 +64,22 @@ def _feedback_dict(**overrides) -> dict:
     return base
 
 
+def test_record_miss_returns_none_and_warns_on_write_failure(
+    opensre_home: Path, monkeypatch, capsys
+) -> None:
+    def _explode(*_args, **_kwargs):
+        raise PermissionError("disk full")
+
+    monkeypatch.setattr("pathlib.Path.open", _explode)
+
+    result = record_miss(_feedback_dict(), taxonomy=MissTaxonomy.RETRIEVAL_GAP)
+
+    assert result is None
+    err = capsys.readouterr().err
+    assert "could not record miss" in err
+    assert "disk full" in err
+
+
 def test_record_miss_persists_to_jsonl(opensre_home: Path) -> None:
     feedback = _feedback_dict()
     final_state = {"pipeline_name": "checkout/api", "severity": "critical"}
@@ -73,6 +90,7 @@ def test_record_miss_persists_to_jsonl(opensre_home: Path) -> None:
         final_state=final_state,
     )
 
+    assert rec is not None
     assert rec["taxonomy"] == "retrieval_gap"
     assert rec["pipeline_name"] == "checkout/api"
     assert rec["severity"] == "critical"
@@ -87,6 +105,7 @@ def test_record_miss_persists_to_jsonl(opensre_home: Path) -> None:
 
 def test_record_miss_accepts_string_taxonomy(opensre_home: Path) -> None:
     rec = record_miss(_feedback_dict(), taxonomy="reasoning_gap")
+    assert rec is not None
     assert rec["taxonomy"] == "reasoning_gap"
 
 
@@ -240,21 +259,21 @@ def test_to_benchmark_scenario_carries_rubric() -> None:
 
 
 def test_export_scenarios_writes_per_case_directories(tmp_path: Path) -> None:
-    misses = [
-        {
-            "miss_id": "m-1",
-            "alert_name": "checkout 5xx",
-            "taxonomy": "retrieval_gap",
-            "timestamp": "2026-06-02T10:00:00+00:00",
-            "root_cause": "rc",
-        },
-        {
-            "miss_id": "m-2",
-            "alert_name": "checkout 5xx",
-            "taxonomy": "reasoning_gap",
-            "timestamp": "2026-06-02T11:00:00+00:00",
-            "root_cause": "rc2",
-        },
+    misses: list[MissRecord] = [
+        MissRecord(
+            miss_id="m-1",
+            alert_name="checkout 5xx",
+            taxonomy="retrieval_gap",
+            timestamp="2026-06-02T10:00:00+00:00",
+            root_cause="rc",
+        ),
+        MissRecord(
+            miss_id="m-2",
+            alert_name="checkout 5xx",
+            taxonomy="reasoning_gap",
+            timestamp="2026-06-02T11:00:00+00:00",
+            root_cause="rc2",
+        ),
     ]
     out = tmp_path / "scenarios"
 

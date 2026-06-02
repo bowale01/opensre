@@ -459,14 +459,17 @@ def _classify_miss(
     except ValueError:
         taxonomy = MissTaxonomy.UNKNOWN
 
-    miss_record: dict[str, Any] = dict(
-        record_miss(
-            record,
-            taxonomy=taxonomy,
-            taxonomy_detail=record.get("note", ""),
-            final_state=final_state,
-        )
+    persisted = record_miss(
+        record,
+        taxonomy=taxonomy,
+        taxonomy_detail=record.get("note", ""),
+        final_state=final_state,
     )
+    if persisted is None:
+        # record_miss already surfaced the OSError to stderr; suppress the
+        # "saved" confirmation and analytics so the user is not misled.
+        return None
+    miss_record: dict[str, Any] = dict(persisted)
     _emit_miss_classified(miss_record)
     return miss_record
 

@@ -69,4 +69,13 @@ PostHog dashboards built on `investigation_miss_classified` (grouped by `taxonom
 
 ## Privacy
 
-Miss records live entirely on the engineer's machine in `~/.opensre/misses.jsonl`. The PostHog event carries only the taxonomy, run id, alert name, and optional `user_id` / `org_id` — never the free-text note or the captured root cause string. To delete everything captured locally, remove the file.
+Miss records live entirely on the engineer's machine in `~/.opensre/misses.jsonl`. To delete everything captured locally, remove the file.
+
+The `investigation_miss_classified` PostHog event carries identifiers and structured metadata only:
+
+- `miss_id`, `feedback_id`, `run_id`
+- `taxonomy`, `rating`, `has_detail` (boolean — whether a note was provided, never the note itself)
+- `alert_name`, `pipeline_name`, `root_cause_category`
+- Optional `user_id`, `org_id` when running on a hosted/JWT path
+
+The free-text note (`taxonomy_detail`) and the captured `root_cause` string are **never** sent to PostHog — they only exist in the local JSONL store, so removing `~/.opensre/misses.jsonl` removes them entirely.

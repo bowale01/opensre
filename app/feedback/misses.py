@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import sys
 import uuid
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
@@ -91,13 +92,18 @@ def record_miss(
     taxonomy: MissTaxonomy | str,
     taxonomy_detail: str = "",
     final_state: dict[str, Any] | None = None,
-) -> MissRecord:
+) -> MissRecord | None:
     """Persist a miss record derived from a feedback submission.
 
     ``feedback_record`` is the dict the feedback prompt already builds in
     :mod:`app.cli.support.feedback`. ``final_state`` is the investigation
     ``AgentState`` and is used to backfill provenance fields that are not in
     the feedback dict (``pipeline_name``, ``severity``).
+
+    Returns the persisted record on success, ``None`` if the JSONL append
+    failed (disk full, permissions). Write errors are printed to stderr so the
+    user sees them; callers must not show a "saved" confirmation or emit
+    downstream analytics for a ``None`` result.
     """
     tax_value = taxonomy.value if isinstance(taxonomy, MissTaxonomy) else taxonomy
     state = final_state or {}
@@ -122,10 +128,13 @@ def record_miss(
     }
 
     path = misses_path()
-    with contextlib.suppress(OSError):
+    try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"opensre: could not record miss to {path}: {exc}", file=sys.stderr)
+        return None
 
     return record
 
@@ -180,6 +189,20 @@ def _parse_ts(value: Any) -> datetime:
     return datetime.fromtimestamp(0, tz=UTC)
 
 
+def _grouping_key(row: MissRecord) -> tuple[str, str]:
+    """Canonical ``(alert_name, taxonomy)`` key used to group misses.
+
+    Both ``compute_recurrence`` and ``filter_top_misses`` go through this so
+    the ``opensre misses stats`` recurring-pair view and the directory layout
+    written by ``opensre misses export`` always agree on what counts as the
+    same miss.
+    """
+    return (
+        row.get("alert_name", "") or "<unknown>",
+        row.get("taxonomy", "") or MissTaxonomy.UNKNOWN.value,
+    )
+
+
 def compute_recurrence(misses: list[MissRecord]) -> dict[tuple[str, str], int]:
     """Count misses grouped by ``(alert_name, taxonomy)``.
 
@@ -188,8 +211,7 @@ def compute_recurrence(misses: list[MissRecord]) -> dict[tuple[str, str], int]:
     """
     counter: Counter[tuple[str, str]] = Counter()
     for row in misses:
-        key = (row.get("alert_name", "") or "<unknown>", row.get("taxonomy", "unknown"))
-        counter[key] += 1
+        counter[_grouping_key(row)] += 1
     return dict(counter)
 
 
@@ -205,8 +227,9 @@ def compute_stats(misses: list[MissRecord]) -> dict[str, Any]:
     by_taxonomy: Counter[str] = Counter()
     by_alert: defaultdict[str, set[str]] = defaultdict(set)
     for row in misses:
-        by_taxonomy[row.get("taxonomy", MissTaxonomy.UNKNOWN.value)] += 1
-        by_alert[row.get("alert_name", "<unknown>")].add(row.get("taxonomy", ""))
+        alert, taxonomy = _grouping_key(row)
+        by_taxonomy[taxonomy] += 1
+        by_alert[alert].add(taxonomy)
 
     recurrence = compute_recurrence(misses)
     recurring = sorted(
@@ -236,8 +259,7 @@ def filter_top_misses(misses: list[MissRecord], top: int) -> list[MissRecord]:
 
     grouped: defaultdict[tuple[str, str], list[MissRecord]] = defaultdict(list)
     for row in misses:
-        key = (row.get("alert_name", ""), row.get("taxonomy", ""))
-        grouped[key].append(row)
+        grouped[_grouping_key(row)].append(row)
 
     representative: list[tuple[int, datetime, MissRecord]] = []
     for rows in grouped.values():
