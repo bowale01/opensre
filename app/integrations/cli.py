@@ -892,6 +892,24 @@ def _setup_jenkins() -> None:
     )
 
 
+def _setup_pagerduty() -> None:
+    api_key = _p("PagerDuty API key", secret=True)
+    base_url = _p("API base URL override (optional)")
+    if not api_key:
+        _die("api_key is required.")
+    if not base_url:
+        base_url = "https://api.pagerduty.com"
+    upsert_integration(
+        "pagerduty",
+        {
+            "credentials": {
+                "api_key": api_key,
+                "base_url": base_url,
+            }
+        },
+    )
+
+
 _HANDLERS: dict[str, Any] = {
     "alertmanager": _setup_alertmanager,
     "aws": _setup_aws,
@@ -922,6 +940,7 @@ _HANDLERS: dict[str, Any] = {
     "redis": _setup_redis,
     "signoz": _setup_signoz,
     "jenkins": _setup_jenkins,
+    "pagerduty": _setup_pagerduty,
 }
 
 

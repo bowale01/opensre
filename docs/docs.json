@@ -127,6 +127,7 @@
               "incident_io",
               "openobserve",
               "opsgenie",
+              "pagerduty",
               "sentry",
               "signoz",
               "splunk",
