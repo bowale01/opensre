@@ -19,7 +19,9 @@ def reraise_cli_runtime_error(exc: BaseException) -> NoReturn:
 
     classified = classify_llm_invoke_failure(exc)
     if classified is not None:
-        suggestion = "\n".join(classified.remediation_steps) if classified.remediation_steps else None
+        suggestion = (
+            "\n".join(classified.remediation_steps) if classified.remediation_steps else None
+        )
         raise OpenSREError(classified.user_message, suggestion=suggestion) from exc
 
     if isinstance(exc, RuntimeError):
