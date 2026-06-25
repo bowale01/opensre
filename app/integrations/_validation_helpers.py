@@ -22,6 +22,7 @@ def report_validation_failure(
     method: str,
     severity: str = "warning",
     extras: dict[str, Any] | None = None,
+    include_traceback: bool = False,
 ) -> None:
     """Log + Sentry-capture a validator broad-except failure with vendor tags.
 
@@ -38,6 +39,11 @@ def report_validation_failure(
         extras: Optional structured fields (DAG id, statement name, etc.).
             Merged into Sentry ``extra`` without becoming Sentry tags, so
             they don't inflate Sentry's tag cardinality.
+        include_traceback: When ``False`` (default), only the one-line message is
+            logged, so a vendor/config failure (e.g. a ``401`` during
+            ``/integrations``) does not dump a full stack trace into the REPL.
+            The exception is still captured to Sentry with its traceback. Set
+            ``True`` only when the local traceback genuinely aids debugging.
     """
     report_exception(
         exc,
@@ -51,4 +57,28 @@ def report_validation_failure(
             "method": method,
         },
         extras=extras,
+        include_traceback=include_traceback,
+    )
+
+
+def report_classify_failure(
+    exc: BaseException,
+    *,
+    logger: logging.Logger,
+    integration: str,
+    record_id: str,
+) -> None:
+    """Log + Sentry-capture a classify failure for an integration record."""
+    report_exception(
+        exc,
+        logger=logger,
+        message=f"classify_failed: integration={integration} record_id={record_id}",
+        severity="warning",
+        tags={
+            "surface": "integration",
+            "component": "app.integrations",
+            "integration": integration,
+            "event": "classify_failed",
+        },
+        extras={"record_id": record_id},
     )

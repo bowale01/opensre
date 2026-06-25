@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from app.correlation.models import CorrelatedSignal, UpstreamCandidate
+from app.core.domain.types.upstream import (
+    CorrelatedSignal,
+    UpstreamCandidate,
+)
 
 __all__ = [
     "CorrelatedSignal",

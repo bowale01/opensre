@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from app.integrations._relational import RelationalConfigBase, env_bool, env_str
-from app.integrations._validation_helpers import report_validation_failure
+from app.integrations._validation_helpers import report_classify_failure, report_validation_failure
 from app.utils.coercion import safe_int
 from app.utils.truncation import truncate
 
@@ -457,3 +457,26 @@ def get_replication_status(config: MariaDBConfig) -> dict[str, Any]:
             method="get_replication_status",
         )
         return {"source": "mariadb", "available": False, "error": str(err)}
+
+
+def classify(
+    credentials: dict[str, Any], record_id: str
+) -> tuple[MariaDBConfig | None, str | None]:
+    try:
+        cfg = build_mariadb_config(
+            {
+                "host": credentials.get("host", ""),
+                "port": credentials.get("port", 3306),
+                "database": credentials.get("database", ""),
+                "username": credentials.get("username", ""),
+                "password": credentials.get("password", ""),
+                "ssl": credentials.get("ssl", True),
+                "integration_id": record_id,
+            }
+        )
+    except Exception as exc:
+        report_classify_failure(exc, logger=logger, integration="mariadb", record_id=record_id)
+        return None, None
+    if cfg.host and cfg.database:
+        return cfg, "mariadb"
+    return None, None

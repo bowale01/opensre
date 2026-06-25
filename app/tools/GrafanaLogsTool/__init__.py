@@ -41,8 +41,20 @@ def _grafana_creds(grafana: dict) -> dict:
 
 
 def _grafana_source(sources: dict) -> dict:
+    from pydantic import BaseModel
+
     grafana = sources.get("grafana") or sources.get("grafana_local") or {}
-    return grafana if isinstance(grafana, dict) else {}
+    if isinstance(grafana, BaseModel):
+        item = grafana.model_dump(exclude_none=True)
+        item.setdefault("connection_verified", True)
+        return item
+    if isinstance(grafana, dict):
+        if not grafana:
+            return {}
+        item = dict(grafana)
+        item.setdefault("connection_verified", True)
+        return item
+    return {}
 
 
 def _grafana_available(sources: dict) -> bool:

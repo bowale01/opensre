@@ -7,8 +7,8 @@ import httpx
 from click.testing import CliRunner
 
 from app.cli.__main__ import cli
+from app.core.domain.stream import StreamEvent
 from app.remote.ops import RemoteOpsError, RestartResult, ServiceStatus
-from app.remote.stream import StreamEvent
 
 
 class _AnsweredPrompt:
@@ -91,7 +91,7 @@ def test_remote_trigger_persists_url_after_successful_run() -> None:
     with (
         patch("app.cli.wizard.store.load_remote_url", return_value="10.0.0.1"),
         patch("app.remote.client.RemoteAgentClient", return_value=client),
-        patch("app.remote.renderer.StreamRenderer", return_value=renderer),
+        patch("app.cli.ui.renderer.StreamRenderer", return_value=renderer),
         patch("app.cli.wizard.store.save_remote_url") as mock_save_remote_url,
     ):
         result = runner.invoke(cli, ["remote", "trigger"])

@@ -6,7 +6,7 @@ from typing import Any
 
 from rich.markup import escape
 
-from app.cli.interactive_shell.commands import switch_llm_provider, switch_reasoning_model
+from app.cli.interactive_shell.command_registry import switch_llm_provider, switch_reasoning_model
 from app.cli.interactive_shell.routing.handle_message_with_agent.orchestration.execution_policy import (
     evaluate_llm_runtime_switch,
     execution_allowed,
@@ -17,6 +17,7 @@ from app.cli.interactive_shell.routing.handle_message_with_agent.orchestration.e
 from app.cli.interactive_shell.routing.handle_message_with_agent.orchestration.tool_contracts import (
     ToolContext,
     ToolEntry,
+    capability_not_explicitly_disabled,
     object_schema,
 )
 
@@ -82,6 +83,7 @@ TOOL_ENTRY = ToolEntry(
     ),
     execution_tier=ExecutionTier.ELEVATED,
     execute=execute_llm_provider_action,
+    is_available=lambda session: capability_not_explicitly_disabled(session, "llm_provider"),
 )
 
 

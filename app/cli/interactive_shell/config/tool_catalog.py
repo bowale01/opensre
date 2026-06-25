@@ -10,7 +10,7 @@ the interactive-shell user.
 This module turns the registry snapshot into a compact catalog suitable for
 two independent consumers:
 
-1. The ``/list tools`` slash command — users can see what tools are wired
+1. The ``/tools`` slash command — users can see what tools are wired
    into their build of the shell.
 2. Future codebase-aware grounding — the catalog text can be injected into
    the LLM prompt so the assistant can answer "what tools can the chat
@@ -34,9 +34,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.core.domain.types.tools import ToolSurface
 from app.tools.registered_tool import RegisteredTool
 from app.tools.registry import get_registered_tools
-from app.types.tools import ToolSurface
 
 
 def _detect_repo_root() -> Path:

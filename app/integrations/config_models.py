@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 
 from app.config import get_tracer_base_url
 from app.integrations._validators import (
@@ -19,6 +19,8 @@ from app.strict_config import StrictConfigModel
 from app.utils.url_validation import validate_https_or_loopback_http_url
 
 _LOCAL_GRAFANA_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
+DEFAULT_GROUNDCOVER_MCP_URL = "https://mcp.groundcover.com/api/mcp"
+DEFAULT_GROUNDCOVER_TIMEZONE = "UTC"
 DEFAULT_HONEYCOMB_BASE_URL = "https://api.honeycomb.io"
 DEFAULT_HONEYCOMB_DATASET = "__all__"
 DEFAULT_CORALOGIX_BASE_URL = "https://api.coralogix.com"
@@ -27,6 +29,7 @@ DEFAULT_OPSGENIE_BASE_URLS: dict[str, str] = {
     "eu": "https://api.eu.opsgenie.com",
 }
 DEFAULT_INCIDENT_IO_BASE_URL = "https://api.incident.io"
+DEFAULT_PAGERDUTY_BASE_URL = "https://api.pagerduty.com"
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +77,61 @@ class DatadogIntegrationConfig(StrictConfigModel):
             "DD-APPLICATION-KEY": self.app_key,
             "Content-Type": "application/json",
         }
+
+
+class GroundcoverIntegrationConfig(StrictConfigModel):
+    """Normalized groundcover credentials used by resolution and verification flows.
+
+    groundcover is reached through its public streamable-HTTP MCP endpoint. The
+    bearer ``api_key`` is a read-only service-account token; ``tenant_uuid`` and
+    ``backend_id`` are optional routing selectors only needed when the account
+    has multiple workspaces/backends.
+    """
+
+    api_key: str = ""
+    mcp_url: str = DEFAULT_GROUNDCOVER_MCP_URL
+    tenant_uuid: str = ""
+    backend_id: str = ""
+    timezone: str = DEFAULT_GROUNDCOVER_TIMEZONE
+    integration_id: str = ""
+
+    _normalize_api_key = field_validator("api_key", mode="before")(normalize_bearer())
+    _normalize_strs = field_validator("tenant_uuid", "backend_id", "integration_id", mode="before")(
+        normalize_str()
+    )
+    _normalize_timezone = field_validator("timezone", mode="before")(
+        normalize_with_default(DEFAULT_GROUNDCOVER_TIMEZONE)
+    )
+
+    @field_validator("mcp_url", mode="before")
+    @classmethod
+    def _normalize_mcp_url(cls, value: object) -> str:
+        normalized = normalize_url(DEFAULT_GROUNDCOVER_MCP_URL)(value)
+        return validate_https_or_loopback_http_url(
+            normalized, service_name="groundcover", field_name="mcp_url"
+        )
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.mcp_url)
+
+    @property
+    def request_headers(self) -> dict[str, str]:
+        """HTTP headers for the MCP transport.
+
+        Only auth and timezone are always sent; tenant/backend routing headers
+        are added when configured so single-workspace accounts work with no
+        routing while multi-workspace accounts stay scoped to one context.
+        """
+        headers: dict[str, str] = {
+            "Authorization": f"Bearer {self.api_key}",
+            "X-Timezone": self.timezone,
+        }
+        if self.tenant_uuid:
+            headers["X-Tenant-UUID"] = self.tenant_uuid
+        if self.backend_id:
+            headers["X-Backend-Id"] = self.backend_id
+        return headers
 
 
 class HoneycombIntegrationConfig(StrictConfigModel):
@@ -205,6 +263,25 @@ class OpsGenieIntegrationConfig(StrictConfigModel):
     def headers(self) -> dict[str, str]:
         return {
             "Authorization": f"GenieKey {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+
+class PagerDutyIntegrationConfig(StrictConfigModel):
+    """PagerDuty config"""
+
+    api_key: str
+    base_url: str = DEFAULT_PAGERDUTY_BASE_URL
+    integration_id: str = ""
+
+    _normalize_base_url = field_validator("base_url", mode="before")(
+        normalize_url(DEFAULT_PAGERDUTY_BASE_URL)
+    )
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Token token={self.api_key}",
             "Content-Type": "application/json",
         }
 
@@ -518,6 +595,22 @@ class MongoDBIntegrationConfig(StrictConfigModel):
     _normalize_auth_source = field_validator("auth_source", mode="before")(
         normalize_with_default("admin")
     )
+
+
+class RedisIntegrationConfig(StrictConfigModel):
+    """Normalized Redis credentials used by resolution and verification flows."""
+
+    host: str
+    port: int = 6379
+    username: str = ""
+    password: str = ""
+    db: int = 0
+    ssl: bool = False
+    integration_id: str = ""
+
+    _normalize_host = field_validator("host", mode="before")(normalize_str())
+    _normalize_username = field_validator("username", mode="before")(normalize_str())
+    _normalize_password = field_validator("password", mode="before")(normalize_str())
 
 
 class MongoDBAtlasIntegrationConfig(StrictConfigModel):
@@ -852,6 +945,188 @@ class SlackBotConfig(StrictConfigModel):
         return stripped
 
 
+class SMTPIntegrationConfig(StrictConfigModel):
+    """SMTP runtime config for RCA email delivery."""
+
+    host: str
+    port: int = 587
+    security: str = "starttls"
+    username: str = ""
+    password: str = ""
+    from_address: str
+    default_to: str | None = None
+
+    _normalize_host = field_validator("host", mode="before")(normalize_str())
+    _normalize_security = field_validator("security", mode="before")(
+        normalize_with_default("starttls")
+    )
+    _normalize_username = field_validator("username", mode="before")(normalize_str())
+    _normalize_password = field_validator("password", mode="before")(normalize_str())
+    _normalize_from_address = field_validator("from_address", mode="before")(normalize_str())
+    _normalize_default_to = field_validator("default_to", mode="before")(normalize_str())
+
+    @field_validator("port", mode="before")
+    @classmethod
+    def _normalize_port(cls, value: object) -> int:
+        if isinstance(value, int):
+            port = value
+        elif isinstance(value, str):
+            stripped = value.strip()
+            port = int(stripped) if stripped else 587
+        else:
+            port = 587
+        if port <= 0 or port > 65535:
+            raise ValueError("port must be between 1 and 65535")
+        return port
+
+    @field_validator("security", mode="after")
+    @classmethod
+    def _validate_security(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"starttls", "ssl", "none"}:
+            raise ValueError("security must be one of: starttls, ssl, none")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_auth_pair(self) -> SMTPIntegrationConfig:
+        if bool(self.username) != bool(self.password):
+            raise ValueError("username and password must both be set, or both be empty")
+        if "@" not in self.from_address:
+            raise ValueError("from_address must look like an email address")
+        if self.default_to and "@" not in self.default_to:
+            raise ValueError("default_to must look like an email address")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Cloud Observability Platforms
+# ---------------------------------------------------------------------------
+
+
+class SnowflakeIntegrationConfig(StrictConfigModel):
+    """Normalized Snowflake credentials used by resolution and tool flows."""
+
+    account_identifier: str
+    token: str
+    user: str = ""
+    password: str = ""
+    warehouse: str = ""
+    role: str = ""
+    database: str = ""
+    db_schema: str = Field(
+        default="",
+        alias="schema",
+        validation_alias=AliasChoices("schema", "db_schema"),
+    )
+    max_results: int = 50
+    integration_id: str = ""
+
+    _normalize_strs = field_validator(
+        "user",
+        "password",
+        "warehouse",
+        "role",
+        "database",
+        "db_schema",
+        "integration_id",
+        mode="before",
+    )(normalize_str())
+
+    @field_validator("max_results", mode="before")
+    @classmethod
+    def _clamp_max_results(cls, value: object) -> int:
+        try:
+            v: int = int(value)  # type: ignore[arg-type,call-overload]
+        except (TypeError, ValueError):
+            return 50
+        return max(1, min(v, 200))
+
+
+class AzureIntegrationConfig(StrictConfigModel):
+    """Normalized Azure Monitor Log Analytics credentials."""
+
+    workspace_id: str
+    access_token: str
+    endpoint: str = "https://api.loganalytics.io"
+    tenant_id: str = ""
+    subscription_id: str = ""
+    max_results: int = 100
+    integration_id: str = ""
+
+    _normalize_endpoint = field_validator("endpoint", mode="before")(
+        normalize_url("https://api.loganalytics.io")
+    )
+    _normalize_strs = field_validator(
+        "tenant_id", "subscription_id", "integration_id", mode="before"
+    )(normalize_str())
+
+    @field_validator("max_results", mode="before")
+    @classmethod
+    def _clamp_max_results(cls, value: object) -> int:
+        try:
+            v: int = int(value)  # type: ignore[arg-type,call-overload]
+        except (TypeError, ValueError):
+            return 100
+        return max(1, min(v, 500))
+
+
+class OpenObserveIntegrationConfig(StrictConfigModel):
+    """Normalized OpenObserve credentials used by resolution and tool flows."""
+
+    base_url: str
+    org: str = "default"
+    api_token: str = ""
+    username: str = ""
+    password: str = ""
+    stream: str = ""
+    max_results: int = 100
+    integration_id: str = ""
+
+    _normalize_base_url = field_validator("base_url", mode="before")(normalize_url())
+    _normalize_org = field_validator("org", mode="before")(normalize_with_default("default"))
+    _normalize_strs = field_validator(
+        "api_token", "username", "password", "stream", "integration_id", mode="before"
+    )(normalize_str())
+
+    @field_validator("max_results", mode="before")
+    @classmethod
+    def _clamp_max_results(cls, value: object) -> int:
+        try:
+            v: int = int(value)  # type: ignore[arg-type,call-overload]
+        except (TypeError, ValueError):
+            return 100
+        return max(1, min(v, 500))
+
+
+class OpenSearchIntegrationConfig(StrictConfigModel):
+    """Normalized OpenSearch credentials used by resolution and tool flows."""
+
+    url: str
+    api_key: str = ""
+    username: str = ""
+    password: str = ""
+    index_pattern: str = "*"
+    max_results: int = 100
+    integration_id: str = ""
+
+    _normalize_url = field_validator("url", mode="before")(normalize_url())
+    _normalize_index_pattern = field_validator("index_pattern", mode="before")(
+        normalize_with_default("*")
+    )
+    _normalize_strs = field_validator(
+        "api_key", "username", "password", "integration_id", mode="before"
+    )(normalize_str())
+
+    @field_validator("max_results", mode="before")
+    @classmethod
+    def _clamp_max_results(cls, value: object) -> int:
+        try:
+            v: int = int(value)  # type: ignore[arg-type,call-overload]
+        except (TypeError, ValueError):
+            return 100
+        return max(1, min(v, 500))
+
+
 # ---------------------------------------------------------------------------
 # Tracer internal
 # ---------------------------------------------------------------------------
@@ -889,3 +1164,25 @@ class PrefectIntegrationConfig(StrictConfigModel):
     _normalize_strs = field_validator("api_key", "account_id", "workspace_id", mode="before")(
         normalize_str()
     )
+
+
+class TemporalIntegrationConfig(StrictConfigModel):
+    base_url: str = ""
+    namespace: str = "default"
+    api_key: str = ""
+    integration_id: str = ""
+
+    _normalize_base_url = field_validator("base_url", mode="before")(normalize_url(""))
+    _normalize_strs = field_validator("api_key", "namespace", mode="before")(normalize_str())
+
+    @property
+    def headers(self) -> dict[str, str]:
+
+        headers = {
+            "Content-Type": "application/json",
+        }
+
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        return headers

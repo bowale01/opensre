@@ -10,6 +10,8 @@
 
 - Use strict typing, follow DRY principle
 - One clear purpose per file (separation of concerns)
+- Do not keep compatibility-only forwarding modules after refactors. Once imports and tests
+  are migrated, remove the old module path in the same change and use one canonical import path.
 
 Before any push or PR creation follow **[CI.md](CI.md)** — lint, format, typecheck, and test commands all live there.
 
@@ -44,15 +46,18 @@ Before any push or PR creation follow **[CI.md](CI.md)** — lint, format, typec
 - `app/entrypoints/` — SDK and MCP entrypoints exposed to external runtimes.
 - `app/guardrails/` — Guardrail rules, evaluation engine, audit helpers, and CLI bindings.
 - `app/integrations/` — Integration config normalization, verification, selectors, store, and catalog logic.
+- `app/integrations/hermes/` — Hermes log tailing, incident classification, correlator, sinks, and investigation bridge.
 - `app/integrations/llm_cli/` — Subprocess-backed LLM CLIs (e.g. Codex). Extension guide: `app/integrations/llm_cli/AGENTS.md`.
 - `app/masking/` — Masking utilities for redacting or normalizing sensitive content.
-- `app/pipeline/` — Investigation orchestration and runner helpers (`run_investigation`, `run_chat`).
+- `app/core/orchestration/` — Investigation orchestration, public entrypoints, and stage nodes.
+- `app/core/runtime/` — Shared LLM tool-calling loop (execute tools, message shaping, context budget).
 - `app/remote/` — Remote-hosted runtime operations and integration points.
 - `app/sandbox/` — Sandboxed execution helpers for controlled runtime actions.
 - `app/services/` — Reusable clients and adapters for integrations/tools. LLM APIs: `app/services/AGENTS.md`.
-- `app/state/` — Shared agent and investigation state models plus state factories.
+- `app/state/` — Shared agent runtime envelope (`AgentState`), chat slice, and state factories.
+- `app/core/domain/state/` — Investigation pipeline slice contracts, `EvidenceEntry`, and diagnosis rules.
 - `app/tools/` — Tool registry, decorator, base classes, per-tool packages, shared utilities, and registry helpers.
-- `app/types/` — Shared typed contracts for evidence, retrieval, and tool-related payloads.
+- `app/core/domain/types/` — Shared typed contracts for evidence, retrieval, and tool-related payloads.
 - `app/utils/` — Cross-cutting utility helpers used across the app and test harnesses.
 - `app/watch_dog/` — Watchdog feature: per-threshold Telegram alarm dispatch with cooldown, sitting on top of `app/utils/telegram_delivery.py`.
 - `app/webapp.py` — Web-facing application entrypoint; the `opensre` CLI is `app/cli/__main__.py`.
@@ -83,15 +88,20 @@ Steps:
 
 ### Changing the investigation pipeline
 
-Investigations are coordinated in `app/pipeline/pipeline.py` and exposed via
-`app/pipeline/runners.py`. Agent logic lives under `app/agent/`; publishing
-under `app/delivery/`.
+Investigations are coordinated in `app/core/orchestration/pipeline.py` and exposed via
+`app/core/orchestration/entrypoints.py`. Stage nodes live under
+`app/core/orchestration/node/`; publishing under
+`app/core/orchestration/node/publish_findings/`.
 
 Files to touch:
 
-- `app/pipeline/pipeline.py` for high-level stage ordering.
-- `app/agent/` for extract, context, investigation, or chat behavior.
-- `app/state/*.py` when adding or renaming persisted investigation fields.
+- `app/core/orchestration/pipeline.py` for high-level stage ordering.
+- `app/core/domain/` for pure investigation rules (alert source mapping, tool planning,
+  category alignment, correlation scoring).
+- `app/core/runtime/` for shared LLM runtime helpers (tool loop and LLM invoke error
+  classification).
+- `app/state/*.py` and `app/core/domain/state/runtime_slices.py` when adding or renaming persisted
+  investigation fields (update `AgentStateModel` and the matching slice).
 - `docs/` — update or add a page if the change introduces user-visible behavior or configuration.
 - `tests/` coverage for the affected CLI, synthetic, or integration paths.
 
@@ -121,6 +131,7 @@ Examples from the repo:
 
 - Datadog: `app/services/datadog/client.py`, `app/integrations/catalog.py`, `app/integrations/verify.py`, `app/tools/DataDog*`, and `tests/integrations/test_verify.py`.
 - Grafana: `app/integrations/catalog.py`, `app/integrations/verify.py`, `app/tools/Grafana*`, `app/cli/wizard/local_grafana_stack/`, and the Grafana-related tests under `tests/integrations/`.
+- Hermes: `app/integrations/hermes/`, `app/tools/HermesLogsTool/`, `app/tools/HermesSessionEvidenceTool/`, `app/cli/commands/hermes.py`, `tests/hermes/`, and `tests/synthetic/hermes/`.
 
 Basic steps:
 
@@ -144,7 +155,7 @@ Basic steps:
 - If adding a new integration -> follow [TOOL_INTEGRATION_CHECKLIST.md](TOOL_INTEGRATION_CHECKLIST.md) before opening the PR for review.
 - If adding new tests -> always place them in `tests/`, never in `app/` (no inline tests).
 - If CI-only tests are added -> mark them with the right pytest marker or place them in the appropriate e2e/synthetic/chaos folder so they do not run in the default local suite.
-- If investigation branching or loop behavior changes -> update `app/pipeline/pipeline.py` and the tests for that path.
+- If investigation branching or loop behavior changes -> update `app/core/orchestration/pipeline.py` and the tests for that path.
 - If adding or changing interactive REPL behavior (slash commands, session management, display output) -> use `ReplDriver` from `tests/utils/repl_driver.py` for live verification alongside unit tests; see [TESTING.md](TESTING.md).
 - If pushing or creating a PR -> follow the full pre-push checklist in [CI.md](CI.md).
 
@@ -154,6 +165,7 @@ Test commands, routing rules, CI-only paths: **[CI.md](CI.md)**. Live REPL testi
 
 ## 5. Footguns (common mistakes to avoid)
 
+- No planning-stage fail-closed safeguard (v0.1): the interactive-shell action planner never denies a turn with "I couldn't safely decide actions". All terminal actions are read-only, so unmatched/ambiguous/chatty clauses run what they can and fall through to the assistant. Do **not** reintroduce a planner denial, the `mark_unhandled` tool, or the `UNHANDLED:` convention. Rationale and details: `app/cli/interactive_shell/routing/AGENTS.md` and `docs/routing-policy-architecture.md`. If mutating actions are ever added, gate them at the execution stage (`orchestration/execution_policy.py`), not the planner.
 - Vendored deps: No obvious vendored third-party dependencies are present. Python dependencies are managed in `pyproject.toml`, and the docs site has its own `docs/package.json` and `docs/pnpm-lock.yaml`. Do not vendor new libraries unless there is a strong reason.
 - Secrets: Never commit `.env` - always use `.env.example` as the template. Use read-only credentials for production integrations.
 - CI-only tests: Some e2e tests, including Kubernetes, EKS, and chaos engineering paths, require live infrastructure and are excluded from `make test-cov`. Do not expect them to pass locally without that environment.
@@ -161,6 +173,8 @@ Test commands, routing rules, CI-only paths: **[CI.md](CI.md)**. Live REPL testi
 - Docker requirement: Several targets, including the Grafana local stack and Chaos Mesh workflows, require a running Docker daemon.
 - Docs navigation: Adding an `.mdx` file under `docs/` is not enough — Mintlify only shows pages listed in `docs/docs.json`. Forgetting the `pages` entry leaves the doc unreachable from the site sidebar.
 - Investigation tool schemas: draft-07 JSON Schema (e.g. `"type": ["object", "null"]`) can pass loose checks but fail the LLM API on first invoke because **all** available investigation tools are sent together. Normalize in the provider adapter and extend registry contract tests; see [docs/investigation-tool-calling.md](docs/investigation-tool-calling.md).
+- Compatibility shims: Do not leave modules whose only job is to re-export symbols from a new
+  location. Update callers to the canonical module and delete the old path.
 
 ## 6. New Integration Checklist
 

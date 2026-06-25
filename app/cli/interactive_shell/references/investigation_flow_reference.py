@@ -1,20 +1,22 @@
 """Static grounding for the OpenSRE investigation flow.
 
 The interactive-shell assistant does not run investigations itself, but users
-ask how alerts are processed. Keep this aligned with ``app/pipeline/pipeline.py``
-and the agent packages under ``app/agent/``.
+ask how alerts are processed. Keep this aligned with
+``app/core/orchestration/pipeline.py`` and the investigation packages under
+``app/core/``.
 """
 
 from __future__ import annotations
 
 _INVESTIGATION_FLOW_REFERENCE = """\
 Source files:
-- app/pipeline/pipeline.py coordinates resolve → extract → investigate → deliver.
-- app/pipeline/runners.py exposes run_investigation / run_chat for CLI and tests.
-- app/agent/context.py resolves integrations from local configuration.
-- app/agent/extract.py parses the raw alert into structured state.
-- app/agent/investigation.py runs the connected investigation agent (tools + LLM).
-- app/delivery/ publishes findings (terminal, Slack, GitLab writeback, etc.).
+- app/core/orchestration/pipeline.py coordinates resolve → extract → investigate → deliver.
+- app/core/orchestration/entrypoints.py exposes run_investigation for CLI, SDK, and tests.
+- app/core/orchestration/node/resolve_integrations/node.py resolves integrations.
+- app/core/orchestration/node/extract_alert/node.py parses the raw alert into structured state.
+- app/core/orchestration/node/investigate/agent.py runs the connected investigation agent (tools + LLM).
+- app/core/orchestration/node/diagnose/node.py parses the agent conclusion into structured RCA fields.
+- app/core/orchestration/node/publish_findings/ publishes findings (terminal, Slack, GitLab writeback, etc.).
 - app/state/agent_state.py defines AgentState / InvestigationState.
 
 Entry:

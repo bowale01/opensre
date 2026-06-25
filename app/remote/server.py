@@ -46,8 +46,9 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from app.analytics.cli import capture_investigation_failed, track_investigation
 from app.analytics.source import EntrypointSource, TriggerMode
-from app.cli.support.cli_error_mapping import reraise_cli_runtime_error
-from app.cli.support.errors import OpenSREError
+from app.cli.interactive_shell.error_handling.cli_error_mapping import reraise_cli_runtime_error
+from app.cli.interactive_shell.error_handling.errors import OpenSREError
+from app.cli.interactive_shell.ui.output.boundary import install_product_adapters
 from app.remote.error_reporting import report_remote_exception
 from app.remote.vercel_poller import (
     VercelInvestigationCandidate,
@@ -60,6 +61,7 @@ from app.version import get_version
 
 load_dotenv(override=False)
 init_sentry(entrypoint="remote")
+install_product_adapters()
 
 INVESTIGATIONS_DIR = Path(
     os.getenv("INVESTIGATIONS_DIR", str(Path.home() / ".opensre" / "investigations"))
@@ -387,6 +389,15 @@ def deep_health_check() -> dict[str, Any]:
     }
 
 
+def _opensre_error_to_http(exc: OpenSREError) -> HTTPException:
+    """Convert an ``OpenSREError`` to a 503 HTTPException with actionable detail."""
+    logger.warning("Investigation failed due to CLI runtime error: %s", exc)
+    detail = str(exc)
+    if exc.suggestion:
+        detail = f"{detail} Suggestion: {exc.suggestion}"
+    return HTTPException(status_code=503, detail=detail)
+
+
 @app.post("/investigate", response_model=InvestigateResponse)
 def investigate(req: InvestigateRequest) -> InvestigateResponse:
     """Run an investigation and persist the result as a ``.md`` file."""
@@ -401,15 +412,18 @@ def investigate(req: InvestigateRequest) -> InvestigateResponse:
     except VercelResolutionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OpenSREError as exc:
-        logger.warning("Investigation failed due to CLI runtime error: %s", exc)
-        detail = str(exc)
-        if exc.suggestion:
-            detail = f"{detail} Suggestion: {exc.suggestion}"
-        raise HTTPException(status_code=503, detail=detail) from exc
+        raise _opensre_error_to_http(exc) from exc
     except Exception as exc:
-        capture_exception(exc)
-        logger.exception("Investigation failed")
-        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
+        try:
+            reraise_cli_runtime_error(exc)
+        except OpenSREError as mapped:
+            raise _opensre_error_to_http(mapped) from mapped
+        except Exception as inner_exc:
+            capture_exception(inner_exc)
+            logger.exception("Investigation failed")
+            raise HTTPException(
+                status_code=500, detail=f"{type(inner_exc).__name__}: {inner_exc}"
+            ) from inner_exc
 
     inv_id = _make_id(alert_name)
     _save_investigation(
@@ -443,7 +457,7 @@ async def investigate_stream(req: InvestigateRequest) -> Response:
     """
     from app.cli.investigation import resolve_investigation_context
     from app.config import LLMSettings
-    from app.pipeline.runners import astream_investigation
+    from app.core.orchestration.entrypoints import astream_investigation
 
     LLMSettings.from_env()
     try:

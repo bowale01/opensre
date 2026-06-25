@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 from pydantic import Field, field_validator
 
-from app.integrations._validation_helpers import report_validation_failure
+from app.integrations._validation_helpers import report_classify_failure, report_validation_failure
 from app.strict_config import StrictConfigModel
 from app.utils.coercion import safe_int
 
@@ -234,17 +234,24 @@ def rabbitmq_extract_params(sources: dict[str, dict]) -> dict[str, Any]:
 
 def _summarize_queue(queue: dict[str, Any]) -> dict[str, Any]:
     stats = queue.get("message_stats") or {}
+    # The Management API returns these count fields as an explicit JSON ``null``
+    # (not just absent) for queues without live stats — e.g. a queue whose home
+    # node is down, or right after a broker restart before the stats DB is
+    # populated. ``dict.get(key, 0)`` only substitutes the default when the key
+    # is missing, so ``null`` would flow through as ``None`` and crash the
+    # backlog sort below (``None + None``). Coerce with ``or 0``, mirroring the
+    # ``message_stats or {}`` guard above.
     return {
         "name": queue.get("name", ""),
         "vhost": queue.get("vhost", ""),
         "state": queue.get("state", "unknown"),
-        "messages_ready": queue.get("messages_ready", 0),
-        "messages_unacknowledged": queue.get("messages_unacknowledged", 0),
-        "messages_total": queue.get("messages", 0),
-        "messages_persistent": queue.get("messages_persistent", 0),
-        "consumers": queue.get("consumers", 0),
+        "messages_ready": queue.get("messages_ready") or 0,
+        "messages_unacknowledged": queue.get("messages_unacknowledged") or 0,
+        "messages_total": queue.get("messages") or 0,
+        "messages_persistent": queue.get("messages_persistent") or 0,
+        "consumers": queue.get("consumers") or 0,
         "consumer_utilisation": queue.get("consumer_utilisation"),
-        "memory_bytes": queue.get("memory", 0),
+        "memory_bytes": queue.get("memory") or 0,
         "publish_rate": (stats.get("publish_details") or {}).get("rate", 0.0),
         "deliver_rate": (stats.get("deliver_get_details") or {}).get("rate", 0.0),
         "ack_rate": (stats.get("ack_details") or {}).get("rate", 0.0),
@@ -547,3 +554,27 @@ __all__ = [
     "rabbitmq_is_available",
     "validate_rabbitmq_config",
 ]
+
+
+def classify(
+    credentials: dict[str, Any], record_id: str
+) -> tuple[RabbitMQConfig | None, str | None]:
+    try:
+        cfg = build_rabbitmq_config(
+            {
+                "host": credentials.get("host", ""),
+                "management_port": credentials.get("management_port", 15672),
+                "username": credentials.get("username", ""),
+                "password": credentials.get("password", ""),
+                "vhost": credentials.get("vhost", "/"),
+                "ssl": credentials.get("ssl", False),
+                "verify_ssl": credentials.get("verify_ssl", True),
+                "integration_id": record_id,
+            }
+        )
+    except Exception as exc:
+        report_classify_failure(exc, logger=logger, integration="rabbitmq", record_id=record_id)
+        return None, None
+    if cfg.host and cfg.username:
+        return cfg, "rabbitmq"
+    return None, None

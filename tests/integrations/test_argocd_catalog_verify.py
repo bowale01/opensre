@@ -6,7 +6,8 @@ import pytest
 
 from app.integrations.catalog import classify_integrations, resolve_effective_integrations
 from app.integrations.models import ArgoCDIntegrationConfig
-from app.integrations.verify import _verify_argocd, verify_integrations
+from app.integrations.verify import verify_integrations
+from app.services.argocd.verifier import verify_argocd as _verify_argocd
 
 
 @pytest.fixture(autouse=True)
@@ -42,11 +43,11 @@ def test_classify_argocd_store_record() -> None:
         ]
     )
 
-    assert resolved["argocd"]["base_url"] == "https://argocd.example.com"
-    assert resolved["argocd"]["bearer_token"] == "tok_store"
-    assert resolved["argocd"]["project"] == "default"
-    assert resolved["argocd"]["app_namespace"] == "argocd"
-    assert resolved["argocd"]["integration_id"] == "argocd-store-1"
+    assert resolved["argocd"].base_url == "https://argocd.example.com"
+    assert resolved["argocd"].bearer_token == "tok_store"
+    assert resolved["argocd"].project == "default"
+    assert resolved["argocd"].app_namespace == "argocd"
+    assert resolved["argocd"].integration_id == "argocd-store-1"
 
 
 def test_classify_argocd_rejects_plain_http_remote() -> None:

@@ -9,12 +9,18 @@ from rich.console import Console
 from rich.markup import escape
 
 from app.cli.interactive_shell.command_registry.types import ExecutionTier, SlashCommand
-from app.cli.interactive_shell.runtime import ReplSession, TaskKind
+from app.cli.interactive_shell.error_handling.exception_reporting import report_exception
+from app.cli.interactive_shell.runtime import ReplSession
+from app.cli.interactive_shell.runtime.background_runner import (
+    start_background_template_investigation,
+    start_background_text_investigation,
+)
+from app.cli.interactive_shell.runtime.foreground_investigation import run_foreground_investigation
+from app.cli.interactive_shell.runtime.tasks import TaskRecord
 from app.cli.interactive_shell.ui import (
     DIM,
     ERROR,
     HIGHLIGHT,
-    WARNING,
     print_repl_json,
 )
 from app.cli.interactive_shell.ui.choice_menu import (
@@ -22,13 +28,11 @@ from app.cli.interactive_shell.ui.choice_menu import (
     repl_section_break,
     repl_tty_interactive,
 )
-from app.cli.support.errors import OpenSREError
-from app.cli.support.exception_reporting import report_exception
 from app.llm_reasoning_effort import apply_reasoning_effort
 
 
 def _interactive_template_menu(session: ReplSession, console: Console) -> bool:
-    from app.cli.support.constants import ALERT_TEMPLATE_CHOICES
+    from app.cli.interactive_shell.data_store.constants import ALERT_TEMPLATE_CHOICES
 
     root = "/template"
     choices: list[tuple[str, str]] = [(c, c) for c in ALERT_TEMPLATE_CHOICES]
@@ -45,8 +49,18 @@ def _interactive_template_menu(session: ReplSession, console: Console) -> bool:
         repl_section_break(console)
 
 
+def _queue_investigate_target(session: ReplSession, target: str) -> None:
+    """Defer a menu selection to a normal ``/investigate <target>`` turn.
+
+    The interactive picker needs exclusive stdin, but long-running RCA must not
+    hold it — queue the resolved target so the loop auto-submits it on the next
+    prompt iteration without ``queue.join()`` blocking.
+    """
+    session.queue_auto_command(f"/investigate {target}")
+
+
 def _interactive_investigate_menu(session: ReplSession, console: Console) -> bool:
-    from app.cli.support.constants import SAMPLE_ALERT_OPTIONS
+    from app.cli.interactive_shell.data_store.constants import SAMPLE_ALERT_OPTIONS
 
     root = "/investigate"
     choices: list[tuple[str, str]] = [
@@ -69,8 +83,8 @@ def _interactive_investigate_menu(session: ReplSession, console: Console) -> boo
             if custom_path is None:
                 continue
             target = custom_path
-        _cmd_investigate_file(session, console, [target])
-        repl_section_break(console)
+        _queue_investigate_target(session, target)
+        return True
 
 
 def _prompt_investigate_path(console: Console) -> str | None:
@@ -87,8 +101,8 @@ def _prompt_investigate_path(console: Console) -> str | None:
 
 
 def _cmd_template(session: ReplSession, console: Console, args: list[str]) -> bool:
+    from app.cli.interactive_shell.data_store.constants import ALERT_TEMPLATE_CHOICES
     from app.cli.investigation.alert_templates import build_alert_template
-    from app.cli.support.constants import ALERT_TEMPLATE_CHOICES
 
     if not args and repl_tty_interactive():
         return _interactive_template_menu(session, console)
@@ -133,9 +147,9 @@ def _validate_save_args(args: list[str]) -> str | None:
 def _cmd_investigate_file(session: ReplSession, console: Console, args: list[str]) -> bool:
     from app.analytics.cli import track_investigation
     from app.analytics.source import EntrypointSource, TriggerMode
+    from app.cli.interactive_shell.data_store.constants import ALERT_TEMPLATE_CHOICES
     from app.cli.investigation import run_investigation_for_session, run_sample_alert_for_session
     from app.cli.investigation.payload import resolve_alert_path
-    from app.cli.support.constants import ALERT_TEMPLATE_CHOICES
 
     if not args and repl_tty_interactive():
         return _interactive_investigate_menu(session, console)
@@ -161,11 +175,17 @@ def _cmd_investigate_file(session: ReplSession, console: Console, args: list[str
     # in the working directory. Users can still force file mode with an explicit
     # path form (for example: ``/investigate ./generic``).
     if template_name:
-        task = session.task_registry.create(
-            TaskKind.INVESTIGATION, command=f"/investigate {template_name}"
-        )
-        task.mark_running()
-        try:
+        if session.background_mode_enabled:
+            start_background_template_investigation(
+                template_name=template_name,
+                session=session,
+                console=console,
+                display_command=f"/investigate {template_name}",
+            )
+            session.record("alert", f"/investigate {template_name}")
+            return True
+
+        def _run_template(task: TaskRecord) -> dict[str, object]:
             with (
                 track_investigation(
                     entrypoint=EntrypointSource.CLI_REPL_FILE,
@@ -178,37 +198,24 @@ def _cmd_investigate_file(session: ReplSession, console: Console, args: list[str
                 suppress = getattr(console, "suppress_prompt_spinner", None)
                 if callable(suppress):
                     suppress()
-                final_state = run_sample_alert_for_session(
+                return run_sample_alert_for_session(
                     template_name=template_name,
                     context_overrides=session.accumulated_context or None,
                     cancel_requested=task.cancel_requested,
                 )
-        except KeyboardInterrupt:
-            task.mark_cancelled()
-            console.print(f"[{WARNING}]investigation cancelled.[/]")
-            session.record("alert", f"/investigate {template_name}", ok=False)
-            session.mark_latest(ok=False, kind="slash")
-            return True
-        except OpenSREError as exc:
-            task.mark_failed(str(exc))
-            console.print(f"[{ERROR}]investigation failed:[/] {escape(str(exc))}")
-            if exc.suggestion:
-                console.print(f"[{WARNING}]suggestion:[/] {escape(exc.suggestion)}")
-            session.record("alert", f"/investigate {template_name}", ok=False)
-            session.mark_latest(ok=False, kind="slash")
-            return True
-        except Exception as exc:
-            task.mark_failed(str(exc))
-            report_exception(exc, context="interactive_shell.investigate_template")
-            console.print(f"[{ERROR}]investigation failed:[/] {escape(str(exc))}")
+
+        final_state = run_foreground_investigation(
+            session=session,
+            console=console,
+            task_command=f"/investigate {template_name}",
+            run=_run_template,
+            exception_context="interactive_shell.investigate_template",
+        )
+        if final_state is None:
             session.record("alert", f"/investigate {template_name}", ok=False)
             session.mark_latest(ok=False, kind="slash")
             return True
 
-        root = final_state.get("root_cause")
-        task.mark_completed(result=str(root) if root is not None else "")
-        session.last_state = final_state
-        session.accumulate_from_state(final_state)
         session.record("alert", f"/investigate {template_name}")
         return True
 
@@ -226,9 +233,17 @@ def _cmd_investigate_file(session: ReplSession, console: Console, args: list[str
         session.mark_latest(ok=False, kind="slash")
         return True
 
-    task = session.task_registry.create(TaskKind.INVESTIGATION, command=f"/investigate {path}")
-    task.mark_running()
-    try:
+    if session.background_mode_enabled:
+        start_background_text_investigation(
+            alert_text=text,
+            session=session,
+            console=console,
+            display_command=f"/investigate {path}",
+        )
+        session.record("alert", args[0])
+        return True
+
+    def _run_file(task: TaskRecord) -> dict[str, object]:
         with (
             track_investigation(
                 entrypoint=EntrypointSource.CLI_REPL_FILE,
@@ -241,39 +256,24 @@ def _cmd_investigate_file(session: ReplSession, console: Console, args: list[str
             suppress = getattr(console, "suppress_prompt_spinner", None)
             if callable(suppress):
                 suppress()
-            final_state = run_investigation_for_session(
+            return run_investigation_for_session(
                 alert_text=text,
                 context_overrides=session.accumulated_context or None,
                 cancel_requested=task.cancel_requested,
             )
-    except KeyboardInterrupt:
-        task.mark_cancelled()
-        console.print(f"[{WARNING}]investigation cancelled.[/]")
-        session.record("alert", args[0], ok=False)
-        session.mark_latest(ok=False, kind="slash")
-        return True
-    except OpenSREError as exc:
-        task.mark_failed(str(exc))
-        console.print(f"[{ERROR}]investigation failed:[/] {escape(str(exc))}")
-        if exc.suggestion:
-            console.print(f"[{WARNING}]suggestion:[/] {escape(exc.suggestion)}")
-        session.record("alert", args[0], ok=False)
-        session.mark_latest(ok=False, kind="slash")
-        return True
-    except Exception as exc:
-        task.mark_failed(str(exc))
-        report_exception(exc, context="interactive_shell.investigate_file")
-        console.print(f"[{ERROR}]investigation failed:[/] {escape(str(exc))}")
+
+    final_state = run_foreground_investigation(
+        session=session,
+        console=console,
+        task_command=f"/investigate {path}",
+        run=_run_file,
+        exception_context="interactive_shell.investigate_file",
+    )
+    if final_state is None:
         session.record("alert", args[0], ok=False)
         session.mark_latest(ok=False, kind="slash")
         return True
 
-    root = final_state.get("root_cause")
-    task.mark_completed(result=str(root) if root is not None else "")
-    session.last_state = final_state
-    # Match `run_new_alert` in runtime/execution.py: inherit service / cluster / region
-    # across subsequent investigations in the same REPL session.
-    session.accumulate_from_state(final_state)
     session.record("alert", f"/investigate {raw_target}")
     return True
 
@@ -379,7 +379,11 @@ COMMANDS: list[SlashCommand] = [
             "/investigate alert.json",
             "/investigate generic",
         ),
-        notes=("In a TTY, bare /investigate opens runnable demo/template options.",),
+        notes=(
+            "In a TTY, bare /investigate opens runnable demo/template options.",
+            "Menu selections queue a normal /investigate <target> turn so the prompt "
+            "stays free during RCA.",
+        ),
         first_arg_completions=_INVESTIGATE_FIRST_ARGS,
         execution_tier=ExecutionTier.SAFE,
         validate_args=_validate_investigate_args,

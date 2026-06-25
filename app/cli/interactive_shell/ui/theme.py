@@ -28,13 +28,14 @@ from __future__ import annotations
 from rich.theme import Theme
 
 # ── Semantic color tokens (the only permitted colours) ─────────────────────
+# BRAND/DIM/HIGHLIGHT/WARNING are re-exported from app.ui_theme so core
+# modules (e.g. the publish_findings terminal renderer) can read the
+# same hex values without depending on the CLI layer. CLI-only tokens
+# (TEXT, SECONDARY, ERROR, BG) stay here.
+from app.ui_theme import BRAND, DIM, HIGHLIGHT, WARNING
 
-HIGHLIGHT = "#B9EDAF"
-BRAND = "#66A17D"
 TEXT = "#E0E0E0"
 SECONDARY = "#888888"
-DIM = "#444444"
-WARNING = "#CEA25C"
 ERROR = "#C45B52"
 BG = "#0A0A0A"
 
@@ -46,8 +47,52 @@ BOLD_TEXT = f"bold {TEXT}"
 BOLD_WARNING = f"bold {WARNING}"
 BOLD_ERROR = f"bold {ERROR}"
 
+# GitHub/device-flow one-time codes should be easy to spot and transcribe.
+DEVICE_CODE = BOLD_HIGHLIGHT
+
 # Distinct accent for incoming alerts (visually distinct from BOLD_BRAND used for assistant)
 INCOMING_ALERT_ACCENT = BOLD_WARNING
+
+__all__ = [
+    "ANSI_BOLD",
+    "ANSI_DIM",
+    "ANSI_RESET",
+    "BG",
+    "BOLD_BRAND",
+    "BOLD_BRAND_ANSI",
+    "BOLD_ERROR",
+    "BOLD_HIGHLIGHT",
+    "BOLD_TEXT",
+    "BOLD_WARNING",
+    "BRAND",
+    "BRAND_ANSI",
+    "DEVICE_CODE",
+    "DEVICE_CODE_ANSI",
+    "DIM",
+    "DIM_ANSI",
+    "DIM_COUNTER_ANSI",
+    "ERROR",
+    "GLYPH_ACTIVE",
+    "GLYPH_BULLET",
+    "GLYPH_ERROR",
+    "GLYPH_PROMPT",
+    "GLYPH_SUCCESS",
+    "GLYPH_WARNING",
+    "HIGHLIGHT",
+    "HIGHLIGHT_ANSI",
+    "INCOMING_ALERT_ACCENT",
+    "INPUT_SURFACE",
+    "INPUT_SURFACE_BG_ANSI",
+    "MARKDOWN_THEME",
+    "MENU_SELECTION_ROW_ANSI",
+    "PROMPT_ACCENT_ANSI",
+    "PROMPT_FRAME_ANSI",
+    "SECONDARY",
+    "SURFACE_BG_ANSI",
+    "TEXT",
+    "TEXT_ANSI",
+    "WARNING",
+]
 
 # ── Semantic glyphs ────────────────────────────────────────────────────────
 
@@ -79,6 +124,7 @@ BRAND_ANSI = _fg(_BRAND_RGB)
 TEXT_ANSI = _fg(_TEXT_RGB)
 DIM_ANSI = _fg(_DIM_RGB)
 BOLD_BRAND_ANSI = f"\x1b[1m{BRAND_ANSI}"
+DEVICE_CODE_ANSI = f"\x1b[1;38;2;{_HIGHLIGHT_RGB[0]};{_HIGHLIGHT_RGB[1]};{_HIGHLIGHT_RGB[2]}m"
 
 ANSI_RESET = "\x1b[0m"
 ANSI_BOLD = "\x1b[1m"

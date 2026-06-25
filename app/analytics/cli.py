@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from app.analytics.events import Event
 from app.analytics.provider import Properties, get_analytics
+from app.analytics.repl_context import get_cli_session_id
 from app.analytics.source import EntrypointSource, TriggerMode, build_source_properties
 from app.utils.sentry_sdk import capture_exception
 
@@ -216,6 +217,14 @@ def _capture(event: Event, properties: Properties | None = None) -> None:
         capture_exception(exc)
 
 
+def _integration_lifecycle_properties(service: str) -> Properties:
+    properties: Properties = {"service": service}
+    session_id = get_cli_session_id()
+    if session_id:
+        properties["cli_session_id"] = session_id
+    return properties
+
+
 def _bucket_duration_ms(duration_ms: float) -> str:
     if duration_ms < 500:
         return "<500ms"
@@ -343,6 +352,20 @@ def capture_investigation_started(
     )
 
 
+def capture_diagnosis_category_mismatch(
+    *,
+    root_cause_category: str,
+    mismatch_reason: str | None = None,
+) -> None:
+    properties: Properties = {
+        "category_text_mismatch": True,
+        "root_cause_category": root_cause_category,
+    }
+    if mismatch_reason:
+        properties["mismatch_reason"] = mismatch_reason
+    _capture(Event.DIAGNOSIS_CATEGORY_MISMATCH, properties)
+
+
 def capture_investigation_completed(*, tracker: InvestigationTracker | None = None) -> None:
     if tracker is None:
         _capture(Event.INVESTIGATION_COMPLETED)
@@ -437,11 +460,11 @@ def track_investigation(
 
 
 def capture_integration_setup_started(service: str) -> None:
-    _capture(Event.INTEGRATION_SETUP_STARTED, {"service": service})
+    _capture(Event.INTEGRATION_SETUP_STARTED, _integration_lifecycle_properties(service))
 
 
 def capture_integration_setup_completed(service: str) -> None:
-    _capture(Event.INTEGRATION_SETUP_COMPLETED, {"service": service})
+    _capture(Event.INTEGRATION_SETUP_COMPLETED, _integration_lifecycle_properties(service))
 
 
 def capture_integrations_listed() -> None:
@@ -449,11 +472,40 @@ def capture_integrations_listed() -> None:
 
 
 def capture_integration_removed(service: str) -> None:
-    _capture(Event.INTEGRATION_REMOVED, {"service": service})
+    _capture(Event.INTEGRATION_REMOVED, _integration_lifecycle_properties(service))
 
 
 def capture_integration_verified(service: str) -> None:
-    _capture(Event.INTEGRATION_VERIFIED, {"service": service})
+    _capture(Event.INTEGRATION_VERIFIED, _integration_lifecycle_properties(service))
+
+
+def identify_github_username(username: str) -> None:
+    """Attach the authenticated GitHub username to PostHog.
+
+    Calls :meth:`~app.analytics.provider.Analytics.identify` to persist
+    ``github_username`` on the person profile AND
+    :meth:`~app.analytics.provider.Analytics.set_persistent_property` so the
+    property is stamped directly on every subsequent event.  Both are needed:
+    the ``$identify`` call keeps the person profile up-to-date for cohort
+    queries, while the persistent property makes ``github_username`` queryable
+    as a plain ``properties.github_username`` filter on any event without
+    requiring a person-profile join.
+
+    No-op for an empty username. Best-effort: telemetry kill-switches make the
+    underlying calls no-ops, and any unexpected error is swallowed to Sentry.
+    """
+    if not username:
+        return
+    try:
+        analytics = get_analytics()
+        analytics.identify({"github_username": username})
+        analytics.set_persistent_property("github_username", username)
+    except Exception as exc:
+        capture_exception(exc)
+
+
+def capture_github_login_completed(username: str) -> None:
+    _capture(Event.GITHUB_LOGIN_COMPLETED, {"github_username": username})
 
 
 def capture_tests_picker_opened() -> None:

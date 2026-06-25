@@ -23,6 +23,23 @@ def test_is_available_requires_grafana_creds() -> None:
     assert rt.is_available({}) is False
 
 
+def test_is_available_accepts_classified_grafana_model() -> None:
+    from app.integrations.config_models import GrafanaIntegrationConfig
+
+    rt = query_grafana_logs.__opensre_registered_tool__
+    assert (
+        rt.is_available(
+            {
+                "grafana": GrafanaIntegrationConfig(
+                    endpoint="https://tracerbio.grafana.net",
+                    api_key="glsa_test",
+                )
+            }
+        )
+        is True
+    )
+
+
 def test_extract_params_maps_fields() -> None:
     rt = query_grafana_logs.__opensre_registered_tool__
     sources = mock_agent_state()
@@ -44,6 +61,22 @@ def test_extract_params_accepts_catalog_grafana_shape() -> None:
     )
     assert params["service_name"] == "api"
     assert params["grafana_endpoint"] == "https://grafana.example.com"
+    assert params["grafana_api_key"] == "glsa_test"
+
+
+def test_extract_params_accepts_classified_grafana_model() -> None:
+    from app.integrations.config_models import GrafanaIntegrationConfig
+
+    rt = query_grafana_logs.__opensre_registered_tool__
+    params = rt.extract_params(
+        {
+            "grafana": GrafanaIntegrationConfig(
+                endpoint="https://tracerbio.grafana.net",
+                api_key="glsa_test",
+            )
+        }
+    )
+    assert params["grafana_endpoint"] == "https://tracerbio.grafana.net"
     assert params["grafana_api_key"] == "glsa_test"
 
 

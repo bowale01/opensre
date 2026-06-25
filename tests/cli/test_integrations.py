@@ -5,8 +5,8 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from app.cli.__main__ import cli
-from app.cli.support.constants import SETUP_SERVICES, VERIFY_SERVICES
-from app.integrations.cli import _HANDLERS, _setup_openclaw, _setup_vercel
+from app.cli.interactive_shell.data_store.constants import SETUP_SERVICES, VERIFY_SERVICES
+from app.integrations.cli import _HANDLERS, _setup_openclaw, _setup_smtp, _setup_vercel
 
 
 def test_integrations_show_redacts_api_token() -> None:
@@ -112,7 +112,7 @@ def test_setup_vercel_saves_credentials(monkeypatch) -> None:
 
 
 def test_setup_openclaw_saves_credentials(monkeypatch) -> None:
-    answers = iter(["1", "openclaw", "mcp serve"])
+    answers = iter(["openclaw", "mcp serve"])
 
     def fake_p(_label: str, default: str = "", secret: bool = False) -> str:
         return next(answers)
@@ -201,6 +201,68 @@ def test_integrations_setup_accepts_twilio() -> None:
     mock_verify.assert_called_once_with("twilio")
 
 
+def test_integrations_setup_accepts_smtp() -> None:
+    runner = CliRunner()
+
+    with (
+        patch("app.cli.commands.integrations.capture_integration_setup_started"),
+        patch("app.cli.commands.integrations.capture_integration_setup_completed"),
+        patch("app.cli.commands.integrations.capture_integration_verified"),
+        patch("app.integrations.cli.cmd_setup") as mock_setup,
+        patch("app.integrations.cli.cmd_verify", return_value=0) as mock_verify,
+    ):
+        mock_setup.return_value = "smtp"
+        result = runner.invoke(cli, ["integrations", "setup", "smtp"])
+
+    assert result.exit_code == 0
+    mock_setup.assert_called_once_with("smtp")
+    mock_verify.assert_called_once_with("smtp")
+
+
+def test_setup_smtp_saves_credentials(monkeypatch) -> None:
+    answers = iter(
+        [
+            "smtp.example.com",
+            "opensre@example.com",
+            "587",
+            "starttls",
+            "mailer",
+            "secret",
+            "team@example.com",
+        ]
+    )
+
+    def fake_p(_label: str, default: str = "", secret: bool = False) -> str:
+        return next(answers)
+
+    saved: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr("app.integrations.cli._p", fake_p)
+    monkeypatch.setattr(
+        "app.integrations.cli.upsert_integration",
+        lambda service, entry: saved.append((service, entry)),
+    )
+
+    _setup_smtp()
+
+    assert _HANDLERS["smtp"] is _setup_smtp
+    assert saved == [
+        (
+            "smtp",
+            {
+                "credentials": {
+                    "host": "smtp.example.com",
+                    "port": 587,
+                    "security": "starttls",
+                    "username": "mailer",
+                    "password": "secret",
+                    "from_address": "opensre@example.com",
+                    "default_to": "team@example.com",
+                }
+            },
+        )
+    ]
+
+
 def test_integrations_setup_skips_auto_verify_for_unverifiable_service() -> None:
     runner = CliRunner()
 
@@ -272,6 +334,27 @@ def test_integrations_verify_accepts_argocd() -> None:
         send_slack_test=False,
     )
     mock_capture.assert_called_once_with("argocd")
+
+
+def test_integrations_setup_accepts_helm() -> None:
+    # Regression test for #1973: helm had verify wired in the registry but no
+    # setup_order / _setup_helm handler, so Click rejected the positional arg.
+    runner = CliRunner()
+
+    with (
+        patch("app.cli.commands.integrations.capture_integration_setup_started"),
+        patch("app.cli.commands.integrations.capture_integration_setup_completed"),
+        patch("app.cli.commands.integrations.capture_integration_verified") as mock_capture,
+        patch("app.integrations.cli.cmd_setup") as mock_setup,
+        patch("app.integrations.cli.cmd_verify", return_value=0) as mock_verify,
+    ):
+        mock_setup.return_value = "helm"
+        result = runner.invoke(cli, ["integrations", "setup", "helm"])
+
+    assert result.exit_code == 0
+    mock_setup.assert_called_once_with("helm")
+    mock_verify.assert_called_once_with("helm")
+    mock_capture.assert_called_once_with("helm")
 
 
 def test_integrations_verify_accepts_helm() -> None:

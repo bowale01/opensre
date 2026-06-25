@@ -32,7 +32,7 @@ class ActionToolRegistry:
         specs: list[dict[str, Any]] = []
         for name in self.names():
             entry = self._tools[name]
-            if not entry.is_available(session):
+            if not entry.is_available(session) or not entry.is_planner_selectable(session):
                 continue
             specs.append(
                 {
@@ -96,8 +96,3 @@ def register_action_tools() -> tuple[str, ...]:
 
 
 register_action_tools()
-
-
-def ensure_action_tools_loaded() -> None:
-    """Backward-compatible no-op alias for callers/tests expecting this hook."""
-    register_action_tools()

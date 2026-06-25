@@ -11,7 +11,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import Field, field_validator
 
-from app.integrations._validation_helpers import report_validation_failure
+from app.integrations._validation_helpers import report_classify_failure, report_validation_failure
 from app.strict_config import StrictConfigModel
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ class AirflowConfig(StrictConfigModel):
     timeout_seconds: float = Field(default=DEFAULT_AIRFLOW_TIMEOUT_SECONDS, gt=0)
     verify_ssl: bool = True
     max_results: int = Field(default=DEFAULT_AIRFLOW_MAX_RESULTS, gt=0, le=200)
+    integration_id: str = ""
 
     @field_validator("base_url", mode="before")
     @classmethod
@@ -317,3 +318,27 @@ def get_recent_airflow_failures(
             )
 
     return evidence
+
+
+def classify(
+    credentials: dict[str, Any], record_id: str
+) -> tuple[AirflowConfig | None, str | None]:
+    try:
+        cfg = build_airflow_config(
+            {
+                "base_url": credentials.get("base_url", DEFAULT_AIRFLOW_BASE_URL),
+                "username": credentials.get("username", ""),
+                "password": credentials.get("password", ""),
+                "auth_token": credentials.get("auth_token", ""),
+                "timeout_seconds": credentials.get("timeout_seconds", 15.0),
+                "verify_ssl": credentials.get("verify_ssl", True),
+                "max_results": credentials.get("max_results", 50),
+                "integration_id": record_id,
+            }
+        )
+    except Exception as exc:
+        report_classify_failure(exc, logger=logger, integration="airflow", record_id=record_id)
+        return None, None
+    if cfg.is_configured:
+        return cfg, "airflow"
+    return None, None

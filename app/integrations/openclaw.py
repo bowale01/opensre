@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator, Coroutine, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -32,7 +32,7 @@ from mcp.client.stdio import stdio_client  # type: ignore[import-not-found]
 from pydantic import Field, field_validator, model_validator
 from typing_extensions import TypedDict
 
-from app.integrations._validation_helpers import report_validation_failure
+from app.integrations._validation_helpers import report_classify_failure, report_validation_failure
 from app.integrations.mcp_streamable_http_compat import streamable_http_client
 from app.strict_config import StrictConfigModel
 
@@ -89,6 +89,7 @@ class OpenClawConfig(StrictConfigModel):
     headers: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=15.0, gt=0)
     integration_id: str = ""
+    connection_verified: bool = True
 
     @field_validator("url", mode="before")
     @classmethod
@@ -625,3 +626,25 @@ def validate_openclaw_config(config: OpenClawConfig) -> OpenClawValidationResult
             ok=False,
             detail=f"OpenClaw bridge validation failed: {describe_openclaw_error(err, config)}",
         )
+
+
+def classify(
+    credentials: dict[str, Any], record_id: str
+) -> tuple[OpenClawConfig | None, str | None]:
+    try:
+        cfg = build_openclaw_config(
+            {
+                "url": credentials.get("url", ""),
+                "mode": credentials.get("mode", "streamable-http"),
+                "command": credentials.get("command", ""),
+                "args": credentials.get("args", []),
+                "auth_token": credentials.get("auth_token", ""),
+                "integration_id": record_id,
+            }
+        )
+    except Exception as exc:
+        report_classify_failure(exc, logger=logger, integration="openclaw", record_id=record_id)
+        return None, None
+    if cfg.is_configured:
+        return cfg, "openclaw"
+    return None, None

@@ -9,12 +9,12 @@ import threading
 from collections.abc import Generator, Iterator
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from app.cli.support.cli_error_mapping import reraise_cli_runtime_error
+from app.cli.interactive_shell.error_handling.cli_error_mapping import reraise_cli_runtime_error
 from app.config import resolve_llm_settings
 from app.utils.tracing import traceable
 
 if TYPE_CHECKING:
-    from app.remote.stream import StreamEvent
+    from app.core.domain.stream import StreamEvent
     from app.state import AgentState
 
 _logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def _check_llm_settings() -> None:
     """Validate LLM settings early and surface misconfiguration as a structured error."""
     from pydantic import ValidationError
 
-    from app.cli.support.errors import OpenSREError
+    from app.cli.interactive_shell.error_handling.errors import OpenSREError
 
     try:
         resolve_llm_settings()
@@ -52,7 +52,7 @@ def _check_llm_settings() -> None:
 def _reraise_investigation_failure(exc: BaseException) -> NoReturn:
     """Map investigation runtime failures to structured CLI errors."""
     if isinstance(exc, _InvestigationPumpCancelled):
-        from app.cli.support.errors import OpenSREError
+        from app.cli.interactive_shell.error_handling.errors import OpenSREError
 
         raise OpenSREError(
             "Investigation streaming stopped before completion.",
@@ -69,7 +69,7 @@ def _call_run_investigation(
     investigation_metadata: tuple[str, str, str] | None = None,
 ) -> AgentState:
     """Import the heavy investigation runner only when execution starts."""
-    from app.pipeline.runners import run_investigation
+    from app.core.orchestration.entrypoints import run_investigation
 
     return run_investigation(
         raw_alert,
@@ -181,7 +181,7 @@ def stream_investigation_cli(
     import queue
     import threading
 
-    from app.pipeline.runners import astream_investigation
+    from app.core.orchestration.entrypoints import astream_investigation
 
     _check_llm_settings()
 
@@ -255,7 +255,7 @@ def run_investigation_cli_streaming(
     Uses async pipeline streaming + ``StreamRenderer`` so the local CLI shows
     the same live tool-call and reasoning updates as a remote investigation.
     """
-    from app.remote.renderer import StreamRenderer
+    from app.cli.ui.renderer import StreamRenderer
 
     events = stream_investigation_cli(
         raw_alert=raw_alert,
@@ -269,8 +269,10 @@ def run_investigation_cli_streaming(
         events.close()
         raise
 
-    from app.cli.support.feedback import prompt_investigation_feedback
+    from app.cli.interactive_shell.ui.feedback import prompt_investigation_feedback
+    from app.cli.interactive_shell.ui.key_reader import restore_stdin_terminal
 
+    restore_stdin_terminal()
     prompt_investigation_feedback(final_state)
     return {
         "report": final_state.get("slack_message", final_state.get("report", "")),
@@ -286,12 +288,13 @@ def _run_session_alert_payload(
     raw_alert: dict[str, Any],
     context_overrides: dict[str, Any] | None = None,
     cancel_requested: threading.Event | None = None,
+    render: bool = True,
 ) -> dict[str, Any]:
     """Run a streaming investigation from an already-structured session alert."""
     import queue
 
-    from app.pipeline.runners import astream_investigation
-    from app.remote.renderer import StreamRenderer
+    from app.cli.ui.renderer import StreamRenderer
+    from app.core.orchestration.entrypoints import astream_investigation
 
     _check_llm_settings()
     if context_overrides:
@@ -355,22 +358,41 @@ def _run_session_alert_payload(
         finally:
             _cancel_pump()
 
-    renderer = StreamRenderer(local=True)
+    if render:
+        renderer = StreamRenderer(local=True)
+        try:
+            rendered_state = renderer.render_stream(_events())
+        except KeyboardInterrupt:
+            _cancel_pump()
+            raise
+        finally:
+            # Always join so unexpected exceptions from render_stream don't leak
+            # the daemon thread and leave an orphaned LLM call running.
+            thread.join(timeout=5)
+            if thread.is_alive():
+                _logger.warning(
+                    "investigation thread did not terminate within 5s after cancellation; "
+                    "an LLM call may still be in flight"
+                )
+        return dict(rendered_state)
+
+    from app.cli.interactive_shell.ui.output import reset_tracker, set_silent_tracker
+
+    set_silent_tracker()
+    renderer = StreamRenderer(local=True, display=False)
     try:
-        final_state = renderer.render_stream(_events())
+        return dict(renderer.render_stream(_events()))
     except KeyboardInterrupt:
         _cancel_pump()
         raise
     finally:
-        # Always join so unexpected exceptions from render_stream don't leak
-        # the daemon thread and leave an orphaned LLM call running.
+        reset_tracker()
         thread.join(timeout=5)
         if thread.is_alive():
             _logger.warning(
                 "investigation thread did not terminate within 5s after cancellation; "
                 "an LLM call may still be in flight"
             )
-    return dict(final_state)
 
 
 def run_investigation_for_session(
@@ -401,6 +423,7 @@ def run_investigation_for_session(
         raw_alert=raw_alert,
         context_overrides=context_overrides,
         cancel_requested=cancel_requested,
+        render=True,
     )
 
 
@@ -417,4 +440,38 @@ def run_sample_alert_for_session(
         raw_alert=build_alert_template(template_name),
         context_overrides=context_overrides,
         cancel_requested=cancel_requested,
+        render=True,
+    )
+
+
+def run_investigation_for_session_background(
+    *,
+    alert_text: str,
+    context_overrides: dict[str, Any] | None = None,
+    cancel_requested: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Run a non-rendering investigation for session-local background tasks."""
+    raw_alert: dict[str, Any] = {"alert_name": "Interactive session", "message": alert_text}
+    return _run_session_alert_payload(
+        raw_alert=raw_alert,
+        context_overrides=context_overrides,
+        cancel_requested=cancel_requested,
+        render=False,
+    )
+
+
+def run_sample_alert_for_session_background(
+    *,
+    template_name: str = "generic",
+    context_overrides: dict[str, Any] | None = None,
+    cancel_requested: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Run a non-rendering sample-alert investigation for background tasks."""
+    from app.cli.investigation.alert_templates import build_alert_template
+
+    return _run_session_alert_payload(
+        raw_alert=build_alert_template(template_name),
+        context_overrides=context_overrides,
+        cancel_requested=cancel_requested,
+        render=False,
     )

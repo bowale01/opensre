@@ -20,9 +20,9 @@ import httpx
 import pytest
 
 from app.integrations._catalog_impl import _classify_service_instance
-from app.integrations._verification_adapters import _verify_victoria_logs
 from app.integrations.catalog import load_env_integrations
 from app.integrations.config_models import VictoriaLogsIntegrationConfig
+from app.services.victoria_logs.verifier import verify_victoria_logs as _verify_victoria_logs
 
 
 class TestVictoriaLogsIntegrationConfig:
@@ -94,8 +94,8 @@ class TestClassifyServiceInstance:
         )
         assert key == "victoria_logs"
         assert config is not None
-        assert config["base_url"] == "http://vmlogs:9428"
-        assert config["integration_id"] == "vl-prod"
+        assert config.base_url == "http://vmlogs:9428"
+        assert config.integration_id == "vl-prod"
 
     def test_skips_when_base_url_missing(self) -> None:
         config, key = _classify_service_instance(
@@ -113,7 +113,7 @@ class TestClassifyServiceInstance:
         )
         assert key == "victoria_logs"
         assert config is not None
-        assert config["tenant_id"] == "team-a"
+        assert config.tenant_id == "team-a"
 
 
 class TestVerifyVictoriaLogs:
@@ -166,14 +166,16 @@ class TestVictoriaLogsIntegrationCanonicalShape:
     """Sanity checks that the integration shows up where the runtime expects it."""
 
     def test_classified_config_dump_matches_pydantic_model(self) -> None:
-        """The classifier's model_dump output should round-trip through the model."""
+        """The classifier returns a typed model that round-trips through model_validate."""
         config, _ = _classify_service_instance(
             key="victoria_logs",
             credentials={"base_url": "http://vmlogs:9428", "tenant_id": "x"},
             record_id="vl-1",
         )
-        assert isinstance(config, dict)
-        roundtrip = VictoriaLogsIntegrationConfig.model_validate(config)
+        assert isinstance(config, VictoriaLogsIntegrationConfig)
+        roundtrip = VictoriaLogsIntegrationConfig.model_validate(
+            config.model_dump(exclude_none=True)
+        )
         assert roundtrip.base_url == "http://vmlogs:9428"
         assert roundtrip.tenant_id == "x"
 
@@ -199,7 +201,10 @@ class TestVictoriaLogsIntegrationCanonicalShape:
         spec = next((s for s in INTEGRATION_SPECS if s.service == "victoria_logs"), None)
         assert spec is not None
         assert spec.direct_effective is True
-        assert spec.verifier is _verify_victoria_logs
+        assert spec.has_verifier
+        from app.integrations.verification import get_verifier
+
+        assert get_verifier("victoria_logs") is _verify_victoria_logs
         # Alias map: both spellings normalize to the canonical service.
         assert SERVICE_KEY_MAP["victoria_logs"] == "victoria_logs"
         assert SERVICE_KEY_MAP["victorialogs"] == "victoria_logs"

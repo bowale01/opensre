@@ -7,10 +7,14 @@ read-only and routed through the shared aws_sdk_client allowlist.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.integrations._relational import env_str
+from app.integrations._validation_helpers import report_classify_failure
 from app.strict_config import StrictConfigModel
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_RDS_REGION = "us-east-1"
 
@@ -79,3 +83,20 @@ def rds_extract_params(sources: dict[str, dict]) -> dict[str, Any]:
         "region": region,
         "aws_backend": rds.get("_backend"),
     }
+
+
+def classify(credentials: dict[str, Any], record_id: str) -> tuple[RDSConfig | None, str | None]:
+    try:
+        cfg = build_rds_config(
+            {
+                "db_instance_identifier": credentials.get("db_instance_identifier", ""),
+                "region": credentials.get("region", DEFAULT_RDS_REGION),
+                "integration_id": record_id,
+            }
+        )
+    except Exception as exc:
+        report_classify_failure(exc, logger=logger, integration="rds", record_id=record_id)
+        return None, None
+    if cfg.is_configured:
+        return cfg, "rds"
+    return None, None

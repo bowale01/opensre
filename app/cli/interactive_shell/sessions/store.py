@@ -21,13 +21,10 @@ import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from app.cli.interactive_shell.sessions.protocol import SessionPersistenceSource
 from app.version import get_version
-
-if TYPE_CHECKING:
-    from app.cli.interactive_shell.runtime.session import ReplSession
-
 
 _NAME_MAX_CHARS = 50
 
@@ -77,7 +74,7 @@ def _derive_name(lines: list[str]) -> str:
 
 class SessionStore:
     @staticmethod
-    def open_session(session: ReplSession) -> None:
+    def open_session(session: SessionPersistenceSource) -> None:
         """Write session_start record, creating the session file on disk.
 
         Called once at REPL start and again after every /new (which rotates
@@ -116,7 +113,7 @@ class SessionStore:
             SessionStore.reopen_session(session_id)
 
     @staticmethod
-    def append_turn(session: ReplSession, kind: str, text: str) -> None:
+    def append_turn(session: SessionPersistenceSource, kind: str, text: str) -> None:
         """Append a turn stub to the session file for stats counting.
 
         Called by ReplSession.record() on every interaction. Stubs carry kind
@@ -179,7 +176,44 @@ class SessionStore:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     @staticmethod
-    def flush(session: ReplSession) -> None:
+    def append_tool_call(
+        session_id: str,
+        *,
+        tool: str,
+        arguments: dict[str, Any],
+        result: str,
+        ok: bool,
+        source: str | None = None,
+    ) -> None:
+        """Append one integration/API tool-call result to the session file.
+
+        Written by the conversational data-gathering loop after each tool runs,
+        so a session file carries the actual evidence each turn fetched (tool
+        name, arguments, and a bounded result snippet) rather than only the
+        final prose answer. Callers MUST pass already-redacted, already-truncated
+        values: this writer stays a dumb sink and pulls in no agent/tool imports.
+        No-ops silently if the session file does not exist.
+        """
+        with contextlib.suppress(Exception):
+            path = _session_path(session_id)
+            if not path.exists():
+                return
+            SessionStore._ensure_session_open(session_id)
+            record: dict[str, Any] = {
+                "type": "tool_call",
+                "ts": datetime.now(UTC).isoformat(),
+                "tool": tool,
+                "arguments": arguments,
+                "ok": ok,
+                "result": result,
+            }
+            if source is not None:
+                record["source"] = source
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    @staticmethod
+    def flush(session: SessionPersistenceSource) -> None:
         """Write conversation_snapshot + session_end and close the session file.
 
         Idempotent: no-ops if session_end is already the last line, so

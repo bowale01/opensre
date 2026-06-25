@@ -272,3 +272,24 @@ def search_code(
             method="search_code",
         )
         return {"source": "bitbucket", "available": False, "error": str(err)}
+
+
+def classify(
+    credentials: dict[str, Any], record_id: str
+) -> tuple[BitbucketConfig | None, str | None]:
+    try:
+        cfg = BitbucketConfig.model_validate(
+            {
+                "workspace": credentials.get("workspace", ""),
+                "username": credentials.get("username", ""),
+                "app_password": credentials.get("app_password", ""),
+                "base_url": credentials.get("base_url", DEFAULT_BITBUCKET_BASE_URL),
+                "max_results": credentials.get("max_results", DEFAULT_BITBUCKET_MAX_RESULTS),
+                "integration_id": record_id,
+            }
+        )
+    except Exception:
+        return None, None
+    if cfg.workspace:
+        return cfg, "bitbucket"
+    return None, None
