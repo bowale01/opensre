@@ -10,13 +10,13 @@ from interactive_shell.runtime.core.tasks import TaskRegistry
 from platform.common.task_types import TaskKind, TaskRecord, TaskStatus
 
 if TYPE_CHECKING:
-    from interactive_shell.harness.llm_context.session import (
-        ReplRuntimeContext,
-        ReplSession,
-        ReplSessionBootstrapSpec,
-        create_repl_runtime_context,
-        prepare_repl_session,
-    )
+    import interactive_shell.harness.llm_context.session as _session_types
+
+    ReplRuntimeContext = _session_types.ReplRuntimeContext
+    ReplSession = _session_types.ReplSession
+    ReplSessionBootstrapSpec = _session_types.ReplSessionBootstrapSpec
+    create_repl_runtime_context = _session_types.create_repl_runtime_context
+    prepare_repl_session = _session_types.prepare_repl_session
 
 # Session state/context live in ``interactive_shell.harness.llm_context.session`` (the canonical
 # home). They are re-exported here lazily so the ergonomic

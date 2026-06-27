@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import interactive_shell.harness.llm_context.session.paths as paths
-from interactive_shell.harness.llm_context.session.paths import derive_name
 
 _ROOT_CAUSE_PREVIEW_CHARS = 80
 _DEFAULT_RCA_HISTORY_LIMIT = 50
@@ -102,7 +101,7 @@ class JsonlSessionRepo:
                 results.append(
                     {
                         "session_id": start_record.get("session_id", path.stem),
-                        "name": derive_name(lines),
+                        "name": paths.derive_name(lines),
                         "started_at": start_record.get("started_at"),
                         "opensre_version": start_record.get("opensre_version"),
                         "duration_secs": duration_secs,
@@ -209,7 +208,7 @@ class JsonlSessionRepo:
 
             return {
                 "session_id": start_record.get("session_id", target_path.stem),
-                "name": derive_name(lines),
+                "name": paths.derive_name(lines),
                 "started_at": start_record.get("started_at"),
                 "cli_agent_messages": cli_agent_messages,
                 "accumulated_context": accumulated_context,
@@ -233,7 +232,7 @@ class JsonlSessionRepo:
                 return []
 
         session_id = path.stem
-        session_name = derive_name(lines)
+        session_name = paths.derive_name(lines)
         started_at: str | None = None
         with contextlib.suppress(json.JSONDecodeError):
             start = json.loads(lines[0])
