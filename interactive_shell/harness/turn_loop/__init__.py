@@ -13,6 +13,7 @@ from .types import (
     ShellTurnContext,
     ShellTurnDeps,
     ShellTurnResult,
+    TurnHooks,
 )
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "ShellTurnContext",
     "ShellTurnDeps",
     "ShellTurnResult",
+    "TurnHooks",
     "run_shell_turn",
 ]

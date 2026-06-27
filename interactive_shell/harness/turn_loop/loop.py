@@ -9,9 +9,18 @@ from .types import ShellObservation, ShellTurnContext, ShellTurnDeps, ShellTurnR
 
 def run_shell_turn(context: ShellTurnContext, deps: ShellTurnDeps) -> ShellTurnResult:
     """Run one interactive-shell turn through action, observe, gather, and answer phases."""
+    result = _run_phases(context, deps)
+    hooks = deps.hooks
+    if hooks is not None and hooks.on_turn_complete is not None:
+        hooks.on_turn_complete(result)
+    return result
+
+
+def _run_phases(context: ShellTurnContext, deps: ShellTurnDeps) -> ShellTurnResult:
     session = context.session
     text = context.text
     console = context.console
+    hooks = deps.hooks
 
     # Clear any observation left by a prior turn so only this turn's discovery
     # output can trigger a summary pass.
@@ -24,6 +33,9 @@ def run_shell_turn(context: ShellTurnContext, deps: ShellTurnDeps) -> ShellTurnR
         confirm_fn=context.confirm_fn,
         is_tty=context.is_tty,
     )
+    if hooks is not None and hooks.on_action_result is not None:
+        hooks.on_action_result(turn)
+
     fallback_to_llm = not turn.handled
     snapshot = session.record_terminal_turn(
         executed_count=turn.executed_count,
@@ -68,6 +80,8 @@ def run_shell_turn(context: ShellTurnContext, deps: ShellTurnDeps) -> ShellTurnR
                     is_tty=context.is_tty,
                     tool_observation=command_observation,
                 )
+            if hooks is not None and hooks.on_llm_result is not None:
+                hooks.on_llm_result(run)
             assistant_text = run.response_text if run is not None and run.response_text else ""
             if context.recorder is not None:
                 context.recorder.set_response(assistant_text, run)
@@ -99,6 +113,8 @@ def run_shell_turn(context: ShellTurnContext, deps: ShellTurnDeps) -> ShellTurnR
 
     with apply_reasoning_effort(session.reasoning_effort):
         gathered = deps.gather_evidence(text, session, console, is_tty=context.is_tty)
+        if hooks is not None and hooks.on_gather_result is not None:
+            hooks.on_gather_result(gathered)
         if gathered:
             observations.append(ShellObservation(source="gather", text=gathered, on_screen=False))
             run = deps.answer_agent(
@@ -119,6 +135,8 @@ def run_shell_turn(context: ShellTurnContext, deps: ShellTurnDeps) -> ShellTurnR
                 is_tty=context.is_tty,
                 tool_observation=None,
             )
+    if hooks is not None and hooks.on_llm_result is not None:
+        hooks.on_llm_result(run)
 
     assistant_text = run.response_text if run is not None and run.response_text else ""
     if context.recorder is not None:

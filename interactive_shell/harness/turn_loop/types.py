@@ -23,6 +23,20 @@ CaptureTerminalTurn = Callable[..., None]
 
 
 @dataclass(frozen=True)
+class TurnHooks:
+    """Optional callbacks fired at key points during a shell turn.
+
+    All fields default to None; only set the hooks you need.
+    Fired in the order: on_action_result → on_gather_result → on_llm_result → on_turn_complete.
+    """
+
+    on_action_result: Callable[[TerminalActionExecutionResult], None] | None = None
+    on_gather_result: Callable[[str | None], None] | None = None
+    on_llm_result: Callable[[LlmRunInfo | None], None] | None = None
+    on_turn_complete: Callable[[ShellTurnResult], None] | None = None
+
+
+@dataclass(frozen=True)
 class ShellTurnContext:
     text: str
     session: ReplSession
@@ -38,6 +52,7 @@ class ShellTurnDeps:
     gather_evidence: GatherEvidence
     answer_agent: AnswerAgent
     capture_terminal_turn: CaptureTerminalTurn | None = None
+    hooks: TurnHooks | None = None
 
 
 @dataclass(frozen=True)
@@ -67,4 +82,5 @@ __all__ = [
     "ShellTurnContext",
     "ShellTurnDeps",
     "ShellTurnResult",
+    "TurnHooks",
 ]
