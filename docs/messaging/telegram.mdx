@@ -26,7 +26,7 @@ OpenSRE's Telegram integration delivers investigation findings to any chat your 
 5. BotFather replies with an **HTTP API token** of the form `<numeric-id>:<token-secret>`. Copy it — it is your **bot token**. Treat it like a password. Anyone holding it can send messages as your bot.
 
 <Tip>
-You can change the bot's name, picture, and description later by sending `/mybots` to BotFather and selecting your bot.
+You can change the bot name, picture, and description later by sending `/mybots` to BotFather and selecting your bot.
 </Tip>
 
 ---
@@ -38,7 +38,7 @@ The bot can deliver to three kinds of destinations. Pick the one that fits your 
 <Tabs>
   <Tab title="Group chat">
     1. Open the group where you want findings to land.
-    2. Tap the group name → **Add members** → search for your bot's username → **Add**.
+    2. Tap the group name → **Add members** → search for your bot username → **Add**.
     3. By default, bots in groups only see messages addressed to them, which is fine for delivery-only.
   </Tab>
   <Tab title="Channel">
@@ -72,7 +72,7 @@ The **chat ID** identifies where the bot should post.
    |---|---|---|
    | Direct message with a user | Positive integer | `123456789` |
    | Group | Negative integer | `-987654321` |
-   | Supergroup or channel | Negative integer starting with `-100` | `-1001234567890` |
+   | Large group or channel | Negative integer starting with `-100` | `-1001234567890` |
 
    Copy the entire value, **including the leading minus sign** for groups and channels.
 
@@ -137,7 +137,7 @@ the watchdog or Hermes.
 opensre integrations verify telegram
 ```
 
-This calls Telegram's [`getMe`](https://core.telegram.org/bots/api#getme) endpoint. On success it reports the bot's `@username`. On failure it reports the Telegram API error message verbatim.
+This calls Telegram's [`getMe`](https://core.telegram.org/bots/api#getme) endpoint. On success it reports the bot `@username`. On failure it reports the Telegram API error message verbatim.
 
 You can also trigger a real investigation against a bundled fixture:
 
@@ -208,10 +208,10 @@ These are Telegram API responses that come back when OpenSRE actually tries to p
 
 The bot is not in the chat, or `TELEGRAM_DEFAULT_CHAT_ID` is wrong. Re-add the bot and re-fetch `chat_id` from `getUpdates`.
 
-**`description: bot was kicked from the supergroup …` (or similar)**
+**`description: bot was kicked from the large group …` (or similar)**
 
 Re-add the bot. For channels, the bot must be an administrator with **Post Messages** permission.
 
 **Findings never arrive, but `verify` passes**
 
-`getMe` only confirms the token is valid; it does not test delivery. Send a fresh message in the destination chat and re-fetch `chat_id` from `getUpdates` — your `chat_id` may have changed (for example, if a group was upgraded to a supergroup, the ID is renamed with a `-100` prefix).
+`getMe` only confirms the token is valid; it does not test delivery. Send a fresh message in the destination chat and re-fetch `chat_id` from `getUpdates` — your `chat_id` may have changed (for example, if a group was upgraded and now uses a `-100` prefix).
