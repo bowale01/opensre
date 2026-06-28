@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from core.llm.types import ToolCall
-from core.messages.models import (
+from core.messages.runtime_message_types import (
     BRANCH_SUMMARY_PREFIX,
     BRANCH_SUMMARY_SUFFIX,
     COMPACTION_SUMMARY_PREFIX,

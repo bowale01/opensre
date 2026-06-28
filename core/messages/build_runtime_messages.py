@@ -5,18 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from core.llm.types import ToolCall
-from core.messages.models import (
+from core.messages.convert_to_llm_messages import (
+    build_assistant_message,
+    build_synthetic_assistant_tool_call_message,
+    build_tool_result_messages,
+)
+from core.messages.runtime_message_types import (
     AppRuntimeMessage,
     AssistantRuntimeMessage,
     MessageMetadata,
     RuntimeContent,
     ToolResultRuntimeMessage,
     UserRuntimeMessage,
-)
-from core.messages.provider_conversion import (
-    build_assistant_message,
-    build_synthetic_assistant_tool_call_message,
-    build_tool_result_messages,
 )
 
 
