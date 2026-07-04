@@ -92,7 +92,7 @@ class ReactLoop[RuntimeToolT: RuntimeTool]:
         for iteration in range(self._max_iterations):
             if self._run_iteration(iteration):
                 break
-        return self._result()
+        return self._finalize()
 
     def _run_iteration(self, iteration: int) -> bool:
         """Run one think -> observe step. Return True when the loop should stop."""
@@ -122,7 +122,7 @@ class ReactLoop[RuntimeToolT: RuntimeTool]:
 
     def _think(self, iteration: int) -> Any:
         """Build the request, apply the provider hooks, and call the LLM."""
-        transformed_messages = self._host._transform_context(self._messages)
+        transformed_messages = self._host._transform_messages(self._messages)
         llm_messages = self._host._convert_to_llm(self._llm, transformed_messages)
         enforce_context_budget(
             llm_messages, system=self._system, tools=self._tool_schemas, ceiling=self._ceiling
@@ -288,7 +288,8 @@ class ReactLoop[RuntimeToolT: RuntimeTool]:
             )
         )
 
-    def _result(self) -> AgentRunResult:
+    def _finalize(self) -> AgentRunResult:
+        """Build the run result, emit the end-of-run event, and return the result."""
         run_result = AgentRunResult(
             messages=self._messages,
             final_text=self._final_text,
