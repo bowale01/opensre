@@ -99,3 +99,35 @@ def test_verify_discord_accepts_token_when_client_run_succeeds(monkeypatch: Any)
 
     assert tokens == ["token"]
     assert result["status"] == "passed"
+
+
+def test_classify_validation_error_returns_none_and_reports(monkeypatch: Any) -> None:
+    """SM-18: ValidationError in Discord classify() returns (None, None) and
+    reports a sanitized error (no secret field values) via report_classify_failure."""
+    from unittest.mock import patch
+
+    from pydantic import ValidationError
+
+    from integrations.discord import classify
+
+    # Force model_validate to raise ValidationError
+    def _raise_validation_error(*args: Any, **kwargs: Any) -> None:
+        raise ValidationError.from_exception_data(
+            title="DiscordBotConfig",
+            line_errors=[],
+        )
+
+    monkeypatch.setattr(
+        "integrations.discord.DiscordBotConfig.model_validate",
+        _raise_validation_error,
+    )
+
+    with patch("integrations.discord.report_classify_failure") as mock_report:
+        result = classify({"bot_token": "some-token"}, record_id="rec-discord")
+
+    assert result == (None, None)
+    assert mock_report.call_count == 1
+    exc_arg = mock_report.call_args.args[0]
+    # Must be the safe wrapper, not the raw ValidationError
+    assert isinstance(exc_arg, ValueError)
+    assert "DiscordBotConfig validation failed" in str(exc_arg)
