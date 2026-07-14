@@ -4,7 +4,11 @@ import sys
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
+from pydantic import ValidationError
+
+from integrations.discord import classify
 from integrations.discord.verifier import verify_discord
 
 
@@ -101,33 +105,27 @@ def test_verify_discord_accepts_token_when_client_run_succeeds(monkeypatch: Any)
     assert result["status"] == "passed"
 
 
-def test_classify_validation_error_returns_none_and_reports(monkeypatch: Any) -> None:
-    """SM-18: ValidationError in Discord classify() returns (None, None) and
-    reports a sanitized error (no secret field values) via report_classify_failure."""
-    from unittest.mock import patch
+def test_classify_validation_error_returns_none_and_reports() -> None:
+    """SM-18: a real ValidationError in Discord classify() returns (None, None)
+    and reports the sanitized wrapper (no secret field values) to Sentry.
 
-    from pydantic import ValidationError
-
-    from integrations.discord import classify
-
-    # Force model_validate to raise ValidationError
-    def _raise_validation_error(*args: Any, **kwargs: Any) -> None:
-        raise ValidationError.from_exception_data(
-            title="DiscordBotConfig",
-            line_errors=[],
-        )
-
-    monkeypatch.setattr(
-        "integrations.discord.DiscordBotConfig.model_validate",
-        _raise_validation_error,
-    )
+    Pydantic v2 embeds the failing field's ``input_value`` in the
+    ValidationError string, so forwarding the raw error would leak secrets. Here
+    an invalid ``public_key`` triggers validation, and we assert its value never
+    reaches ``report_classify_failure``.
+    """
+    secret_value = "leaked-non-hex-secret"
 
     with patch("integrations.discord.report_classify_failure") as mock_report:
-        result = classify({"bot_token": "some-token"}, record_id="rec-discord")
+        result = classify(
+            {"bot_token": "some-token", "public_key": secret_value},
+            record_id="rec-discord",
+        )
 
     assert result == (None, None)
     assert mock_report.call_count == 1
     exc_arg = mock_report.call_args.args[0]
-    # Must be the safe wrapper, not the raw ValidationError
-    assert isinstance(exc_arg, ValueError)
-    assert "DiscordBotConfig validation failed" in str(exc_arg)
+    # Must be the safe wrapper, not the raw ValidationError (a ValueError subclass).
+    assert not isinstance(exc_arg, ValidationError)
+    assert str(exc_arg) == "DiscordBotConfig validation failed"
+    assert secret_value not in str(exc_arg)
