@@ -2,6 +2,7 @@
 
 Composition root: :mod:`gateway.runtime.manager` (``GatewayManager``).
 Package entry: ``python -m gateway.main`` → :mod:`gateway.main` → ``manager.main``.
+Slash ports: :mod:`gateway.runtime.slash_ports` (headless adapters for chat turns).
 Shared contracts: :mod:`gateway.runtime.sink_protocol`, :mod:`gateway.runtime.errors`.
 """
 

@@ -13,11 +13,11 @@ def test_gateway_main_delegates_to_manager() -> None:
 
         runtime_main()
 
-    mock_manager.start_gateway.assert_called_once_with()
+    mock_manager.start_gateway.assert_called_once_with(wait=True)
 
 
 def test_gateway_main_module_exports_main() -> None:
     import gateway.main as entry
 
     assert callable(entry.main)
-    assert entry.main.__module__ == "app.entrypoints.gateway"
+    assert entry.main.__module__ == "gateway.runtime.manager"
