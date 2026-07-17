@@ -178,7 +178,7 @@ def _build_cases(tmp_path: Path) -> dict[str, str]:
             configured_integrations_known=True,
             conversation_messages=convo,
             last_state={
-                "raw_alert": {"alert_name": "Checkout 500s"},
+                "alert_name": "Checkout 500s",
                 "root_cause": "DB connection pool exhausted",
                 "problem_md": "Checkout returned 500s after deploy.",
                 "slack_message": "Investigation complete.",
