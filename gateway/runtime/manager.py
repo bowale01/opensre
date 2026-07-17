@@ -31,7 +31,6 @@ from gateway.runtime.daemon import (
     write_component_status,
 )
 from gateway.runtime.errors import GatewayConfigurationError
-from gateway.runtime.slash_ports import gateway_slash_ports_factory
 from gateway.runtime.turn_handler import GatewayTurnHandler
 from gateway.slack.socket_mode_worker import SlackGatewayBackground
 from gateway.slack.wiring import start_slack_worker
@@ -193,14 +192,17 @@ class GatewayManager:
 
 
 def start_gateway(*, wait: bool = True) -> GatewayManager:
-    """Start the gateway with headless slash ports wired for chat turns."""
-    return GatewayManager(
-        slash_ports_factory=gateway_slash_ports_factory,
-    ).start_gateway(wait=wait)
+    """Compatibility wrapper for existing CLI/import callers.
+
+    Production boot with slash ports goes through
+    :mod:`surfaces.cli.gateway_entry` (surfaces may import gateway; the reverse
+    is forbidden).
+    """
+    return GatewayManager().start_gateway(wait=wait)
 
 
 def main() -> None:
-    start_gateway()
+    GatewayManager().start_gateway()
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ def test_gateway_main_delegates_to_manager() -> None:
 
         runtime_main()
 
-    mock_manager.start_gateway.assert_called_once_with(wait=True)
+    mock_manager.start_gateway.assert_called_once_with()
 
 
 def test_gateway_main_module_exports_main() -> None:

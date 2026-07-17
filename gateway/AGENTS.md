@@ -10,8 +10,8 @@ changes.
 | Role | Path |
 |------|------|
 | Package main | `main.py` (`python -m gateway.main`) |
+| Production entry (slash ports) | `surfaces.cli.gateway_entry` (`python -m surfaces.cli.gateway_entry`) |
 | Composition root / process | `runtime/manager.py` |
-| Headless slash ports | `runtime/slash_ports.py` |
 | Daemon pidfile / status | `runtime/daemon.py` |
 | Turn callback | `runtime/turn_handler.py` |
 | Sink + callback contracts | `runtime/sink_protocol.py` |
