@@ -6,8 +6,16 @@ import pytest
 
 from platform.scheduler.credentials import (
     resolve_discord_credentials,
+    resolve_rocketchat_credentials,
     resolve_slack_credentials,
     resolve_telegram_credentials,
+)
+
+_ROCKETCHAT_ENV_VARS = (
+    "ROCKETCHAT_SERVER_URL",
+    "ROCKETCHAT_AUTH_TOKEN",
+    "ROCKETCHAT_USER_ID",
+    "ROCKETCHAT_WEBHOOK_URL",
 )
 
 
@@ -204,3 +212,131 @@ class TestDiscordCredentials:
         )
         creds = resolve_discord_credentials({})
         assert creds == {"bot_token": "discord_from_keyring"}
+
+
+class TestRocketChatCredentials:
+    def test_from_params(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Keys resolve independently, so the store/env must be isolated even
+        # when params are provided — otherwise a locally configured
+        # webhook_url would leak into the result.
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda *_args, **_kwargs: "",
+        )
+        creds = resolve_rocketchat_credentials(
+            {
+                "server_url": "https://chat.example.com",
+                "auth_token": "tok_from_params",
+                "user_id": "u1",
+            }
+        )
+        assert creds == {
+            "server_url": "https://chat.example.com",
+            "auth_token": "tok_from_params",
+            "user_id": "u1",
+        }
+
+    def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setenv("ROCKETCHAT_SERVER_URL", "https://chat.example.com")
+        monkeypatch.setenv("ROCKETCHAT_AUTH_TOKEN", "tok_from_env")
+        monkeypatch.setenv("ROCKETCHAT_USER_ID", "u_env")
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda name, **_kwargs: "tok_from_env" if name == "ROCKETCHAT_AUTH_TOKEN" else "",
+        )
+        creds = resolve_rocketchat_credentials({})
+        assert creds == {
+            "server_url": "https://chat.example.com",
+            "auth_token": "tok_from_env",
+            "user_id": "u_env",
+        }
+
+    def test_auth_token_from_keyring(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setenv("ROCKETCHAT_SERVER_URL", "https://chat.example.com")
+        monkeypatch.setenv("ROCKETCHAT_USER_ID", "u_env")
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda name, **_kwargs: "tok_from_keyring" if name == "ROCKETCHAT_AUTH_TOKEN" else "",
+        )
+        creds = resolve_rocketchat_credentials({})
+        assert creds["auth_token"] == "tok_from_keyring"
+
+    def test_webhook_only_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setenv("ROCKETCHAT_WEBHOOK_URL", "https://chat.example.com/hooks/a/b")
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda *_args, **_kwargs: "",
+        )
+        creds = resolve_rocketchat_credentials({})
+        assert creds == {"webhook_url": "https://chat.example.com/hooks/a/b"}
+
+    def test_webhook_does_not_use_keyring(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda name, **_kwargs: (
+                "https://chat.example.com/hooks/from-keyring"
+                if name == "ROCKETCHAT_WEBHOOK_URL"
+                else ""
+            ),
+        )
+        creds = resolve_rocketchat_credentials({})
+        assert creds == {}
+
+    def test_params_take_priority_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setenv("ROCKETCHAT_AUTH_TOKEN", "tok_from_env")
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda name, **_kwargs: "tok_from_env" if name == "ROCKETCHAT_AUTH_TOKEN" else "",
+        )
+        creds = resolve_rocketchat_credentials({"auth_token": "tok_from_params"})
+        assert creds["auth_token"] == "tok_from_params"
+
+    def test_empty_when_nothing_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for env_var in _ROCKETCHAT_ENV_VARS:
+            monkeypatch.delenv(env_var, raising=False)
+        monkeypatch.setattr(
+            "platform.scheduler.credentials._get_integration_credential",
+            lambda *_: "",
+        )
+        monkeypatch.setattr(
+            "platform.scheduler.credentials.resolve_env_credential",
+            lambda *_args, **_kwargs: "",
+        )
+        creds = resolve_rocketchat_credentials({})
+        assert creds == {}
