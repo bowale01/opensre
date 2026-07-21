@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from integrations.sentry.digest_delivery import (
+from platform.harness_ports import configured_integration_services
+from platform.scheduler.delivery_readiness import (
     delivery_provider_ready,
     digest_delivery_setup_hint,
 )
-from platform.harness_ports import configured_integration_services
 from platform.scheduler.types import Provider
 
 _console = Console()
