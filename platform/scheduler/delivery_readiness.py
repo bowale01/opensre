@@ -50,7 +50,7 @@ def digest_delivery_setup_hint(provider: Provider | str | None = None) -> str:
         if name == Provider.SLACK.value:
             return (
                 "Slack is not configured for delivery. Run "
-                "`opensre integrations setup slack` or set SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN."
+                "`opensre integrations setup slack` or set SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN / SLACK_ACCESS_TOKEN."
             )
     return (
         "No digest delivery channel is configured. Connect Telegram or Slack first "
